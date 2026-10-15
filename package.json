@@ -1,0 +1,8 @@
+{
+  "name": "st-myriad-umbrella",
+  "version": "0.1.0",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/atonal519/ST-MyriadUmbrella.git" },
+  "type": "module",
+  "scripts": { "test": "node test/core.test.mjs" }
+}
