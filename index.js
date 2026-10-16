@@ -3,7 +3,7 @@ import { installDock } from './src/dock.js';
 import { installEditor } from './src/editor.js';
 import { getHost, notify } from './src/host.js';
 import { registerCommands } from './src/reroll.js';
-import { installSettings } from './src/settings.js';
+import { installHome } from './src/home.js';
 import { applyToast } from './src/toast.js';
 import { installTheme } from './src/theme.js';
 
@@ -11,6 +11,7 @@ let dock = null;
 let editor = null;
 let initialized = false;
 let cleanupTheme = null;
+let home = null;
 
 function apply() {
     const config = readConfig();
@@ -24,8 +25,8 @@ function apply() {
 function init() {
     if (initialized) return;
     initialized = true;
-    cleanupTheme = installTheme();
-    installSettings({
+    cleanupTheme = installTheme(() => home?.refreshTheme());
+    home = installHome({
         apply,
         manageDock: () => dock ? dock.manage() : notify('先勾选“悬浮球收纳”，再管理收纳。'),
         addDock: () => dock ? dock.pick() : notify('先勾选“悬浮球收纳”，再点选添加。'),
@@ -36,6 +37,7 @@ function init() {
 }
 
 export function disable() {
+    home?.destroy(); home = null;
     dock?.destroy(); dock = null;
     editor?.(); editor = null;
     applyToast('off');

@@ -4,6 +4,7 @@ import { readConfig, writeConfig } from './config.js';
 import { notify } from './host.js';
 import { bindPressActions } from './press.js';
 import { icons, shadowHost } from './ui.js';
+import { installSyncStatus } from './sync-status.js';
 
 const POSITION_KEY = 'st-tavern-tools-position';
 // Mobile ST fixes body while html establishes the fixed-position containing
@@ -19,8 +20,11 @@ const css = `
     .hub[aria-expanded=true],.hub.pressed,.hub:focus-visible,.hub.dragging{opacity:1}
     @media(hover:hover){.hub:hover{opacity:1}}
     .hub:focus-visible{outline-offset:-3px}
+    .hub svg{stroke-width:1.5}.hub[data-sync=idle]{color:#279f7d}.hub[data-sync=busy]{color:#bb8618}
     .hub[aria-expanded=false][data-edge=left] svg,.hub[aria-expanded=false][data-edge=right] svg{opacity:0}
-    .hub[aria-expanded=false][data-edge=left]::after,.hub[aria-expanded=false][data-edge=right]::after{content:'';position:absolute;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:currentColor}
+    .hub[aria-expanded=false][data-edge=left]::after,.hub[aria-expanded=false][data-edge=right]::after{content:'';position:absolute;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 0 2px color-mix(in srgb,currentColor 12%,transparent)}
+    .hub[data-sync=busy]::after{animation:sync-pulse 900ms ease-in-out infinite}@keyframes sync-pulse{0%,100%{opacity:.65}50%{opacity:1}}
+    @media(prefers-reduced-motion:reduce){.hub[data-sync=busy]::after{animation:none}}
     .hub[aria-expanded=false][data-edge=left]::after{right:5px}.hub[aria-expanded=false][data-edge=right]::after{left:5px}
     .list{position:absolute;width:${SLOT_SIZE}px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;pointer-events:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:${SLOT_GAP}px}.list::-webkit-scrollbar{display:none}
     .slot{display:block;position:relative;flex:none;width:${SLOT_SIZE}px;height:${SLOT_SIZE}px;padding:0;border:0;border-radius:50%;background:transparent!important;touch-action:pan-y}
@@ -41,8 +45,13 @@ export function installDock() {
     const list = root.querySelector('.list');
     const empty = root.querySelector('.empty');
     const pickNote = root.querySelector('.pick-note');
-    hub.innerHTML = icons.layers;
-    hub.title = '点击展开或收起；长按管理悬浮球';
+    hub.innerHTML = icons.umbrella;
+    const cleanupSync = installSyncStatus(busy => {
+        hub.dataset.sync = busy ? 'busy' : 'idle';
+        const state = busy ? '正在同步' : '空闲';
+        hub.title = `${state}；点击展开或收起；长按管理悬浮球`;
+        hub.setAttribute('aria-label', `${state}；点击展开收纳；长按管理`);
+    });
     let position = { x: window.innerWidth - HUB_SIZE, y: 100, edge: 'right' };
     try { Object.assign(position, JSON.parse(localStorage.getItem(POSITION_KEY) || '{}')); } catch { /* device-local position is disposable */ }
     let items = readConfig().dockItems;
@@ -320,7 +329,7 @@ export function installDock() {
         pick,
         reveal() { open = true; paint(); hub.focus({ preventScroll: true }); },
         destroy() {
-            cleanupPress(); observer.disconnect();
+            cleanupSync(); cleanupPress(); observer.disconnect();
             clearTimeout(rebindTimer); cancelAnimationFrame(layoutFrame);
             for (const key of Array.from(bindings.keys())) release(key);
             document.removeEventListener('click', onClick, true);

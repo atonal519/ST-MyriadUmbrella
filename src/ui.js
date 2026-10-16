@@ -1,5 +1,5 @@
 export const icons = {
-    layers: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg>',
+    umbrella: '<svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3Q14.91 4.98 18.36 5.64Q19.02 9.09 21 12Q19.02 14.91 18.36 18.36Q14.91 19.02 12 21Q9.09 19.02 5.64 18.36Q4.98 14.91 3 12Q4.98 9.09 5.64 5.64Q9.09 4.98 12 3Z"/><path d="M12 10.65V3M12.95 11.05 18.36 5.64M13.35 12H21M12.95 12.95 18.36 18.36M12 13.35V21M11.05 12.95 5.64 18.36M10.65 12H3M11.05 11.05 5.64 5.64" stroke-width="1.1"/><circle cx="12" cy="12" r="1.35" stroke-width="1.1"/></svg>',
 };
 
 export const baseCss = `

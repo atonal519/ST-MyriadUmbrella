@@ -1,30 +1,17 @@
 import { readConfig, writeConfig } from './config.js';
 import { notify } from './host.js';
-import { shadowHost } from './ui.js';
 import { quickRepliesEnabled, setQuickRepliesEnabled } from './reroll.js';
 
-export function installSettings({ apply, manageDock, addDock, revealDock }) {
-    const mount = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
-    if (!mount) return;
-    const drawer = document.createElement('div');
-    drawer.className = 'inline-drawer';
-    drawer.id = 'st-tools-settings';
-    drawer.innerHTML = '<div class="inline-drawer-toggle inline-drawer-header"><b>千机伞</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"></div>';
-    drawer.querySelector('b').style.fontSize = '13px';
-    const { host, root } = shadowHost('st-tools-settings-content', ':host{display:block;padding:4px 2px}.settings{font:12px/1.4 var(--mainFontFamily,system-ui,sans-serif)}select{max-width:100%;border:1px solid var(--tt-border);border-radius:5px;padding:3px 5px;background:var(--tt-surface)}.feature{margin:5px 0}label{min-height:23px;gap:5px;flex-wrap:wrap}input[type=checkbox]{margin:0}button{padding:3px 7px;border-radius:5px}.row{gap:5px}hr{margin:7px 0}');
-    root.innerHTML += `
-      <div class="settings">
-      <div class="feature"><label><input type="checkbox" data-setting="dock">悬浮球收纳</label>
-      <div class="row"><button type="button" data-reveal>显示收纳球</button><button type="button" data-manage>管理</button><button type="button" data-add>点选添加</button></div></div>
-      <hr><div class="feature"><label><input type="checkbox" data-qr>在 QR 栏显示重生成和回退输入</label></div>
-      <hr><div class="feature"><label><input type="checkbox" data-setting="editor">正文局部编辑</label></div>
-      <hr><div class="feature"><label>通知外观 <select data-toast aria-label="通知外观"><option value="off">使用酒馆原样</option><option value="bar">顶部长细条</option></select></label>
-      <button type="button" data-preview>显示一条示例通知</button></div>
-      </div>
+export function mountToolbox(root, { apply, manageDock, addDock, revealDock }) {
+    root.classList.add('toolbox');
+    root.innerHTML = `
+      <details class="feature"><summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span>悬浮球收纳</span><input type="checkbox" data-setting="dock" aria-label="启用悬浮球收纳"></summary>
+      <div class="feature-body"><div class="row"><button type="button" data-reveal>显示收纳球</button><button type="button" data-manage>管理</button><button type="button" data-add>点选添加</button></div></div></details>
+      <div class="feature"><label class="feature-switch"><span>QR 重新生成</span><input type="checkbox" data-qr="重新生成" aria-label="在 QR 栏显示重新生成"></label><label class="feature-switch"><span>QR 回退输入</span><input type="checkbox" data-qr="回退输入" aria-label="在 QR 栏显示回退输入"></label></div>
+      <div class="feature"><label class="feature-switch"><span>正文局部编辑</span><input type="checkbox" data-setting="editor" aria-label="正文局部编辑"></label></div>
+      <details class="feature"><summary><i class="fa-solid fa-chevron-right" aria-hidden="true"></i><span>通知外观</span></summary>
+      <div class="feature-body"><select data-toast aria-label="通知外观"><option value="off">使用酒馆原样</option><option value="bar">顶部长细条</option></select><button type="button" data-preview>示例通知</button></div></details>
     `;
-    drawer.querySelector('.inline-drawer-content').append(host);
-    mount.append(drawer);
-    root.addEventListener('keydown', event => event.stopPropagation());
     for (const input of root.querySelectorAll('[data-setting]')) {
         input.checked = readConfig()[input.dataset.setting];
         input.addEventListener('change', () => { writeConfig({ [input.dataset.setting]: input.checked }); apply(); });
@@ -36,16 +23,17 @@ export function installSettings({ apply, manageDock, addDock, revealDock }) {
     root.querySelector('[data-manage]').addEventListener('click', manageDock);
     root.querySelector('[data-add]').addEventListener('click', addDock);
     root.querySelector('[data-reveal]').addEventListener('click', revealDock);
-    const qr = root.querySelector('[data-qr]');
-    qr.checked = quickRepliesEnabled();
-    drawer.querySelector('.inline-drawer-toggle').addEventListener('click', () => { qr.checked = quickRepliesEnabled(); });
-    qr.addEventListener('change', async () => {
-        qr.disabled = true;
+    const replies = root.querySelectorAll('[data-qr]');
+    const refresh = () => { for (const qr of replies) qr.checked = quickRepliesEnabled(undefined, qr.dataset.qr); };
+    refresh();
+    for (const qr of replies) qr.addEventListener('change', async () => {
+        for (const input of replies) input.disabled = true;
         try {
-            await setQuickRepliesEnabled(qr.checked);
+            await setQuickRepliesEnabled(qr.checked, undefined, qr.dataset.qr);
         } catch (error) {
             console.error('[千机伞] 更改 QR 显示失败', error);
             notify(globalThis.quickReplyApi ? '更改 QR 显示失败，请重试。' : error.message, 'warning');
-        } finally { qr.checked = quickRepliesEnabled(); qr.disabled = false; }
+        } finally { refresh(); for (const input of replies) input.disabled = false; }
     });
+    return { refresh };
 }

@@ -4,6 +4,100 @@ import { pathToFileURL } from 'node:url';
 
 const path = '../src/';
 
+test('同步监控保留 fetch 参数与结果，并行请求结束半秒后转为空闲', async () => {
+    const { installSyncStatus } = await import(`${path}sync-status.js`);
+    const calls = [];
+    class Xhr { open() {} }
+    const originalFetch = function (...args) {
+        let resolve, reject;
+        const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+        calls.push({ receiver: this, args, promise, resolve, reject });
+        return promise;
+    };
+    const target = { fetch: originalFetch, XMLHttpRequest: Xhr };
+    const states = [];
+    const stop = installSyncStatus(busy => states.push(busy), target);
+    const response = new Response('unchanged');
+    const get = target.fetch('/read');
+    assert.equal(get, calls[0].promise);
+    calls[0].resolve(response); assert.equal(await get, response);
+    assert.deepEqual(states, [false]);
+    const owner = {};
+    const options = { method: 'post', body: 'original body' };
+    const first = target.fetch.call(owner, '/save', options);
+    const request = new Request('https://example.invalid/item', { method: 'DELETE' });
+    const second = target.fetch(request);
+    assert.equal(calls[1].receiver, owner); assert.equal(calls[1].args[1], options);
+    assert.equal(calls[2].args[0], request);
+    assert.deepEqual(states, [false, true]);
+    calls[1].resolve(response); assert.equal(await first, response);
+    assert.deepEqual(states, [false, true]);
+    const error = new Error('request failed'); calls[2].reject(error);
+    await assert.rejects(second, value => value === error);
+    assert.deepEqual(states, [false, true]);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.deepEqual(states, [false, true, false]);
+    stop(); assert.equal(target.fetch, originalFetch);
+});
+
+test('停用取消空闲更新并保留其他扩展后来安装的网络包装', async () => {
+    const { installSyncStatus } = await import(`${path}sync-status.js`);
+    const result = Promise.resolve(new Response('unchanged'));
+    const nativeFetch = () => result;
+    class Xhr { open() {} }
+    const open = Xhr.prototype.open;
+    const target = { fetch: nativeFetch, XMLHttpRequest: Xhr };
+    const states = [];
+    const stop = installSyncStatus(busy => states.push(busy), target);
+    const wrapped = target.fetch;
+    await target.fetch('/save', { method: 'POST' });
+    const later = function (...args) { return Reflect.apply(wrapped, this, args); };
+    target.fetch = later;
+    stop();
+    assert.equal(target.fetch, later); assert.equal(Xhr.prototype.open, open);
+    assert.equal(target.fetch('/next', { method: 'POST' }), result);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.deepEqual(states, [false, true]);
+});
+
+test('已加载卡片直接读取，懒加载只请求选中的卡，不选择聊天或写设置', async () => {
+    const { readCharacter } = await import(`${path}characters.js`);
+    const full = Object.freeze({ avatar: '完整.png', data: Object.freeze({ first_mes: '开场' }) });
+    const shallow = Object.freeze({ avatar: '待加载.png', shallow: true });
+    const context = { characters: [full, shallow], getRequestHeaders: () => ({ 'Content-Type': 'application/json' }) };
+    let requests = 0;
+    const fetcher = async (url, options) => {
+        requests++;
+        assert.equal(url, '/api/characters/get');
+        assert.deepEqual(JSON.parse(options.body), { avatar_url: '待加载.png' });
+        return { ok: true, json: async () => ({ avatar: shallow.avatar, data: { first_mes: '补读开场' } }) };
+    };
+    assert.equal(await readCharacter(full.avatar, context, fetcher), full);
+    assert.equal(requests, 0);
+    assert.equal((await readCharacter(shallow.avatar, context, fetcher)).data.first_mes, '补读开场');
+    assert.equal(requests, 1);
+    assert.equal(context.characters[1], shallow);
+    await assert.rejects(readCharacter('不存在.png', context, fetcher), /未找到/);
+    await assert.rejects(readCharacter(shallow.avatar, context, async () => ({ ok: true, json: async () => ({ date_added: 0, chat_size: 0 }) })), /未能读取/);
+});
+
+test('只读开场白保留正文，兼容两种卡片字段，空开场不凑条数', async () => {
+    const { getGreetings, greetingCount } = await import(`${path}characters.js`);
+    const card = Object.freeze({ first_mes: '旧字段', data: Object.freeze({ first_mes: '  **正文**\n', alternate_greetings: Object.freeze(['备选一', '', '备选二']) }) });
+    assert.deepEqual(getGreetings(card), ['  **正文**\n', '备选一', '备选二']);
+    assert.equal(greetingCount(card), 3);
+    assert.deepEqual(getGreetings({ first_mes: '原生开场', data: { alternate_greetings: ['另一个开场'] } }), ['原生开场', '另一个开场']);
+    assert.deepEqual(getGreetings({ data: { first_mes: '', alternate_greetings: [] } }), []);
+    assert.equal(greetingCount({ shallow: true }), null);
+});
+
+test('主页主题将透明色合成到实色底板，通知原有黑白回退保持不变', async () => {
+    const { resolveHomePalette, resolveThemePalette } = await import(`${path}theme.js`);
+    assert.deepEqual(resolveHomePalette([180, 150, 100, 0.5], [20, 20, 20, 1]), { surface: '#d7c8ad', ink: '#141414' });
+    assert.deepEqual(resolveHomePalette([20, 40, 60, 1], [230, 235, 240, 1]), { surface: '#14283c', ink: '#e6ebf0' });
+    assert.deepEqual(resolveThemePalette([180, 150, 100, 0.5], [20, 20, 20, 1]), { surface: '#ffffff', ink: '#000000' });
+});
+
 test('透明主题按正文深浅回退到实心黑白，保留不透明主题原配色', async () => {
     const { resolveThemePalette } = await import(`${path}theme.js`);
     for (const alpha of [0, 0.4, 0.99]) {
@@ -58,6 +152,20 @@ test('QR 勾选显示两按钮、取消隐藏，重选不重复添加或覆盖�
     assert.equal(quickRepliesEnabled(api), true);
     assert.equal(set.qrList.length, 3);
     assert.equal(active.length, 1);
+    await setQuickRepliesEnabled(false, api, '回退输入');
+    assert.equal(quickRepliesEnabled(api, '重新生成'), true);
+    assert.equal(quickRepliesEnabled(api, '回退输入'), false);
+    await setQuickRepliesEnabled(false, api, '重新生成');
+    assert.equal(quickRepliesEnabled(api, '重新生成'), false);
+    assert.equal(active.length, 1, '用户自己的可见按钮仍保留');
+    assert.equal(set.qrList[2].message, '/echo 保留');
+    await setQuickRepliesEnabled(true, api, '回退输入');
+    assert.equal(quickRepliesEnabled(api, '回退输入'), true);
+    assert.equal(quickRepliesEnabled(api, '重新生成'), false);
+    api.settings.isEnabled = false;
+    await setQuickRepliesEnabled(true, api, '重新生成');
+    assert.equal(quickRepliesEnabled(api, '重新生成'), true);
+    assert.equal(quickRepliesEnabled(api, '回退输入'), false, '只打开所选按钮');
 });
 
 test('收起贴边只露出 14px，展开后所有入口向下且留在屏幕内', async () => {
