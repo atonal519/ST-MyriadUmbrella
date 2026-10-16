@@ -6,12 +6,16 @@ import { registerCommands } from './src/reroll.js';
 import { installHome } from './src/home.js';
 import { applyToast } from './src/toast.js';
 import { installTheme } from './src/theme.js';
+import { installPresetToggles } from './src/preset-toggles.js';
+import { installCharacterFolders } from './src/character-folders.js';
 
 let dock = null;
 let editor = null;
 let initialized = false;
 let cleanupTheme = null;
 let home = null;
+let cleanupPresetToggles = null;
+let cleanupCharacterFolders = null;
 
 function apply() {
     const config = readConfig();
@@ -20,6 +24,10 @@ function apply() {
     if (config.editor && !editor) editor = installEditor();
     if (!config.editor && editor) { editor(); editor = null; }
     applyToast(config.toast);
+    if (config.presetToggles && !cleanupPresetToggles) cleanupPresetToggles = installPresetToggles();
+    if (!config.presetToggles && cleanupPresetToggles) { cleanupPresetToggles(); cleanupPresetToggles = null; }
+    if (config.foldersEnabled && !cleanupCharacterFolders) cleanupCharacterFolders = installCharacterFolders();
+    if (!config.foldersEnabled && cleanupCharacterFolders) { cleanupCharacterFolders(); cleanupCharacterFolders = null; }
 }
 
 function init() {
@@ -37,6 +45,8 @@ function init() {
 }
 
 export function disable() {
+    cleanupCharacterFolders?.(); cleanupCharacterFolders = null;
+    cleanupPresetToggles?.(); cleanupPresetToggles = null;
     home?.destroy(); home = null;
     dock?.destroy(); dock = null;
     editor?.(); editor = null;
@@ -44,5 +54,5 @@ export function disable() {
     cleanupTheme?.(); cleanupTheme = null;
 }
 
-// Both hosts expose APP_READY via getContext; no chat-switch hooks are needed.
+// Both hosts expose APP_READY via getContext.
 getHost().eventSource.on(getHost().eventTypes.APP_READY, init);

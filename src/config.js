@@ -2,7 +2,7 @@ import { getHost } from './host.js';
 
 // Retain the existing key so renaming the extension keeps users' settings.
 export const KEY = 'st_tavern_tools';
-const defaults = { dock: false, editor: false, toast: 'off', dockItems: [] };
+const defaults = { dock: false, editor: false, toast: 'off', dockItems: [], presetToggles: false, foldersEnabled: false };
 
 export function readConfig() {
     const config = { ...defaults, ...getHost().extensionSettings[KEY] };

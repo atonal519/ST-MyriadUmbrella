@@ -4,6 +4,63 @@ import { pathToFileURL } from 'node:url';
 
 const path = '../src/';
 
+test('文件夹只归类卡片引用，批量移动和删除不改角色数据或其他设置', async () => {
+    const { groupLibraryCards, saveLibraryFolder, moveLibraryCards, deleteLibraryFolder } = await import(`${path}folders.js`);
+    const previous = globalThis.SillyTavern;
+    const cards = [{ avatar: 'a.png', name: '同名' }, { avatar: 'b.png', name: '同名' }];
+    const context = { characters: cards, extensionSettings: { st_tavern_tools: { dock: true } }, saveSettingsDebounced() {} };
+    globalThis.SillyTavern = { getContext: () => context };
+    try {
+        saveLibraryFolder('测试分组');
+        const folder = context.extensionSettings.st_tavern_tools.libraryFolders[0];
+        moveLibraryCards(['a.png'], folder.id);
+        const groups = groupLibraryCards(cards, context.extensionSettings.st_tavern_tools.libraryFolders);
+        assert.equal(groups[0].cards[0], cards[0]); assert.equal(groups[1].cards[0], cards[1]);
+        assert.equal(groups[1].name, '未分类'); assert.equal(context.extensionSettings.st_tavern_tools.dock, true);
+        moveLibraryCards(['a.png'], '');
+        assert.equal(groupLibraryCards(cards, context.extensionSettings.st_tavern_tools.libraryFolders)[1].cards.length, 2);
+        moveLibraryCards(['a.png', 'b.png'], folder.id); deleteLibraryFolder(folder.id);
+        assert.equal(groupLibraryCards(cards, [])[0].cards.length, 2);
+        assert.deepEqual(cards, [{ avatar: 'a.png', name: '同名' }, { avatar: 'b.png', name: '同名' }]);
+    } finally { globalThis.SillyTavern = previous; }
+});
+
+test('随卡开关只改匹配条目的 enabled，未保存的卡恢复预设默认，新条目沿用默认', async () => {
+    const { capturePromptToggles, applyPromptToggles } = await import(`${path}preset-toggles.js`);
+    const order = [{ identifier: 'a', enabled: true }, { identifier: 'b', enabled: false }, { identifier: 'new', enabled: true }];
+    const baseline = structuredClone(order);
+    assert.deepEqual(capturePromptToggles(order), { a: true, b: false, new: true });
+    assert.equal(applyPromptToggles(order, baseline, { a: false, b: true, removed: false }), true);
+    assert.deepEqual(order, [{ identifier: 'a', enabled: false }, { identifier: 'b', enabled: true }, { identifier: 'new', enabled: true }]);
+    applyPromptToggles(order, baseline);
+    assert.deepEqual(order, baseline);
+    assert.equal(applyPromptToggles(order, baseline), false);
+});
+
+test('手动保存只写当前卡当前预设的开关，清除保留其他预设和扩展，失败不冒充成功', async () => {
+    const { saveCardPromptToggles } = await import(`${path}preset-toggles.js`);
+    const card = { avatar: 'a.png', data: { extensions: { external: { keep: 1 }, st_tavern_tools: { keep: 2, promptToggles: [{ preset: 'Other', states: { a: false } }] } } } };
+    let sent;
+    const context = { characters: [card], characterId: 0, getRequestHeaders: () => ({ 'Content-Type': 'application/json' }) };
+    const fetcher = async (url, options) => { sent = { url, data: JSON.parse(options.body) }; return { ok: true, json: async () => ({ ok: true }) }; };
+    await saveCardPromptToggles(context, 'Current', { a: true }, fetcher);
+    assert.equal(sent.url, '/api/characters/merge-attributes');
+    assert.deepEqual(Object.keys(sent.data.data.extensions), ['st_tavern_tools']);
+    assert.deepEqual(card.data.extensions, { external: { keep: 1 }, st_tavern_tools: { keep: 2, promptToggles: [{ preset: 'Other', states: { a: false } }, { preset: 'Current', states: { a: true } }] } });
+    await saveCardPromptToggles(context, 'Current', null, fetcher);
+    assert.deepEqual(card.data.extensions.st_tavern_tools.promptToggles, [{ preset: 'Other', states: { a: false } }]);
+    await assert.rejects(saveCardPromptToggles(context, 'Current', { a: false }, async () => ({ ok: false })), /保存.*失败/);
+    assert.equal(card.data.extensions.st_tavern_tools.promptToggles.some(item => item.preset === 'Current'), false);
+    card.json_data = JSON.stringify(card);
+    await saveCardPromptToggles(context, 'Current', { a: true }, async (url, options) => {
+        assert.deepEqual(Object.keys(JSON.parse(options.body).data.extensions.st_tavern_tools), ['promptToggles']);
+        const raw = JSON.parse(card.json_data); raw.data.extensions.external.live = 3;
+        card.json_data = JSON.stringify(raw);
+        return { ok: true };
+    });
+    assert.equal(JSON.parse(card.json_data).data.extensions.external.live, 3);
+});
+
 test('同步监控保留 fetch 参数与结果，并行请求结束半秒后转为空闲', async () => {
     const { installSyncStatus } = await import(`${path}sync-status.js`);
     const calls = [];
