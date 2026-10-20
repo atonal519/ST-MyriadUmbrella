@@ -1,12 +1,15 @@
 import { BALL_SIZE, DOCK_Z_INDEX, SLOT_SIZE } from './dock-geometry.js';
+import { dockCompatibility } from './dock-compat.js';
 
 // The old zmer dock's stable ID/script/class fingerprint is retained; controls
 // remain in their original document so document-level plugin handlers still work.
-const excluded = '#top-bar,#top-settings-holder,#send_form,#form_sheld,#rightNavHolder,#leftNavHolder,#st-tools-dock,#st-tools-settings,.popup,dialog';
+const excluded = '#top-bar,#top-settings-holder,#send_form,#form_sheld,#rightNavHolder,#leftNavHolder,#st-tools-dock,.popup,dialog';
 const actions = 'button,[role="button"],.menu_button,.interactable';
 const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
 
 export function fingerprint(element) {
+    const compatibility = dockCompatibility(element);
+    if (compatibility) return { elementId: '', scriptId: '', classSelector: compatibility.selector, title: clean(element.getAttribute('title') || element.getAttribute('aria-label')) };
     const classes = Array.from(element.classList || []).filter(token => !/^(active|open|hover|focus|dragging|ui-)/i.test(token)).slice(0, 4);
     return {
         elementId: element.id || '',
@@ -62,15 +65,36 @@ export function holdTarget(element) {
     const prior = new Map(owned.map(key => [key, { value: element.style.getPropertyValue(key), priority: element.style.getPropertyPriority(key) }]));
     const control = actionTarget(element);
     const innerOpacity = control !== element ? { element: control, value: control.style.getPropertyValue('opacity'), priority: control.style.getPropertyPriority('opacity') } : null;
-    return { element, prior, innerOpacity, width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
+    const compatibility = dockCompatibility(element);
+    const container = compatibility?.container && element.closest(compatibility.container);
+    const containerZ = container ? { element: container, value: container.style.getPropertyValue('z-index'), priority: container.style.getPropertyPriority('z-index') } : null;
+    if (compatibility) prior.set('display', { value: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display') });
+    if (container) set(container, 'z-index', String(DOCK_Z_INDEX + 1));
+    return { element, control, prior, innerOpacity, compatibility, containerZ, width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
 }
 
 function set(element, key, value) {
     if (element.style.getPropertyValue(key) !== value || element.style.getPropertyPriority(key) !== 'important') element.style.setProperty(key, value, 'important');
 }
 
+function restore(element, key, old) {
+    if (old.value) {
+        if (element.style.getPropertyValue(key) !== old.value || element.style.getPropertyPriority(key) !== old.priority) element.style.setProperty(key, old.value, old.priority);
+    } else if (element.style.getPropertyValue(key)) element.style.removeProperty(key);
+}
+
+export function suppressCoordinateStart(element) {
+    // Restore through the dock's next alignment. Microtasks can run between
+    // event listeners, before the preset's document listener checks geometry.
+    set(element, 'display', 'none');
+}
+
 export function placeTarget(binding, rect, show) {
     const { element, width, height } = binding;
+    if (binding.compatibility) {
+        if (show) restore(element, 'display', binding.prior.get('display'));
+        else set(element, 'display', 'none');
+    }
     // Normalize the original control to a filled circle, then inset that whole
     // appearance so its border and glyph keep the same proportions.
     const fill = Math.max(1, rect.width / width, rect.height / height);
@@ -92,9 +116,9 @@ export function placeTarget(binding, rect, show) {
 
 export function releaseTarget(binding, point) {
     for (const [key, old] of binding.prior) {
-        if (old.value) binding.element.style.setProperty(key, old.value, old.priority);
-        else binding.element.style.removeProperty(key);
+        restore(binding.element, key, old);
     }
+    if (binding.containerZ) restore(binding.containerZ.element, 'z-index', binding.containerZ);
     if (binding.innerOpacity) {
         const { element, value, priority } = binding.innerOpacity;
         if (value) element.style.setProperty('opacity', value, priority);

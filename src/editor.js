@@ -12,11 +12,20 @@ function caretRange(x, y) {
     return range;
 }
 
-function clickedRange(event, container) {
-    const block = event.target.closest('p,li,blockquote,pre,summary,td,th,h1,h2,h3,h4');
+function selectedRange() {
     const selection = window.getSelection();
-    if (selection?.rangeCount && !selection.isCollapsed && block?.contains(selection.getRangeAt(0).commonAncestorContainer)) {
-        return selection.getRangeAt(0).cloneRange();
+    return selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0).cloneRange() : null;
+}
+
+function clickedRange(event, container, selection) {
+    const block = event.target.closest('p,li,blockquote,pre,summary,td,th,h1,h2,h3,h4');
+    if (selection && block?.contains(selection.commonAncestorContainer)) return selection;
+    // Quotes and emphasis split a paragraph into several text nodes. Default
+    // to the paragraph, while retaining a selection made before the gesture.
+    if (block?.tagName === 'P' && block !== container && container.contains(block)) {
+        const range = document.createRange();
+        range.selectNodeContents(block);
+        return range;
     }
     const caret = caretRange(event.clientX, event.clientY);
     if (caret && container.contains(caret.startContainer) && caret.startContainer.nodeType === Node.TEXT_NODE) {
@@ -41,11 +50,12 @@ export function installEditor() {
     let gesture = null;
     let taps = [];
     let lastTouchAt = 0;
+    let mouseSelection = null;
 
-    const edit = async event => {
+    const edit = async (event, selection) => {
         const container = event.target.closest('.mes_text');
         if (!container || editing || event.target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
-        const range = clickedRange(event, container);
+        const range = clickedRange(event, container, selection);
         if (!range?.toString().trim()) return;
         const row = container.closest('.mes[mesid]');
         const index = Number(row?.getAttribute('mesid'));
@@ -56,7 +66,21 @@ export function installEditor() {
         const prefix = document.createRange();
         prefix.selectNodeContents(container);
         prefix.setEnd(range.startContainer, range.startOffset);
-        const span = locateText(raw, range.toString(), { visibleText: container.textContent, beforeText: prefix.toString() });
+        let span;
+        try {
+            span = locateText(raw, range.toString(), {
+                visibleText: container.textContent, beforeText: prefix.toString(),
+                renderText: marked => {
+                    const template = document.createElement('template');
+                    template.innerHTML = context.messageFormatting(marked, message.name, message.is_system, message.is_user, index);
+                    return template.content.textContent;
+                },
+            });
+        } catch (error) {
+            console.error('[千机伞] 定位正文失败', error);
+            notify('读取这段文字的排版失败，请重新打开编辑。', 'error');
+            return;
+        }
         if (!span) {
             notify('无法准确定位这一段。请选中更完整的文字后再试。', 'warning');
             return;
@@ -93,16 +117,24 @@ export function installEditor() {
         } finally {
             editing = false;
             taps = [];
+            mouseSelection = null;
         }
     };
 
+    // Native double-click selects a word before dblclick fires. Capture any
+    // intentional selection on the first mousedown, before that default runs.
+    const mouseDown = event => {
+        if (event.detail === 1 && Date.now() - lastTouchAt > 1000) mouseSelection = selectedRange();
+    };
     const doubleClick = event => {
-        if (Date.now() - lastTouchAt > 1000) void edit(event);
+        const selection = mouseSelection;
+        mouseSelection = null;
+        if (Date.now() - lastTouchAt > 1000) void edit(event, selection);
     };
     const down = event => {
         if (event.pointerType !== 'touch' || editing || !event.target.closest('.mes_text')) return;
         lastTouchAt = Date.now();
-        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, row: event.target.closest('.mes') };
+        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, row: event.target.closest('.mes'), selection: selectedRange() };
     };
     const move = event => {
         if (gesture?.id === event.pointerId && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 15) {
@@ -115,12 +147,12 @@ export function installEditor() {
         const now = Date.now();
         const last = taps.at(-1);
         if (!last || now - last.time > 450 || last.row !== gesture.row || Math.hypot(last.x - event.clientX, last.y - event.clientY) > 35) taps = [];
-        taps.push({ time: now, x: event.clientX, y: event.clientY, row: gesture.row });
+        taps.push({ time: now, x: event.clientX, y: event.clientY, row: gesture.row, selection: gesture.selection });
         gesture = null;
-        if (taps.length === 3) { taps = []; void edit(event); }
+        if (taps.length === 3) { const selection = taps[0].selection; taps = []; void edit(event, selection); }
     };
-    const cancel = () => { gesture = null; taps = []; };
-    const bindings = { dblclick: doubleClick, pointerdown: down, pointermove: move, pointerup: up, pointercancel: cancel };
+    const cancel = () => { gesture = null; taps = []; mouseSelection = null; };
+    const bindings = { mousedown: mouseDown, dblclick: doubleClick, pointerdown: down, pointermove: move, pointerup: up, pointercancel: cancel };
     for (const [name, handler] of Object.entries(bindings)) chat.addEventListener(name, handler);
-    return () => { for (const [name, handler] of Object.entries(bindings)) chat.removeEventListener(name, handler); };
+    return () => { for (const [name, handler] of Object.entries(bindings)) chat.removeEventListener(name, handler); cancel(); };
 }

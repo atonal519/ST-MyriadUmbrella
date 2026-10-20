@@ -5,12 +5,6 @@ import { mountToolbox } from './settings.js';
 import { installWandEntry } from './wand.js';
 
 export function installHome(actions) {
-    const mount = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
-    if (!mount) return null;
-    const drawer = document.createElement('div');
-    drawer.id = 'st-tools-settings'; drawer.className = 'inline-drawer';
-    drawer.innerHTML = '<div class="inline-drawer-toggle inline-drawer-header"><b style="font-size:13px">千机伞</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div><div class="inline-drawer-content"><button type="button" class="menu_button" style="font-size:12px">打开千机伞</button></div>';
-    mount.append(drawer);
     let host = null;
     let dialog = null;
     let library = null;
@@ -54,10 +48,9 @@ export function installHome(actions) {
         // Opening the album should not summon the mobile keyboard.
         root.querySelector('[data-close]').focus({ preventScroll: true });
     }
-    drawer.querySelector('button').addEventListener('click', open);
     const removeWand = installWandEntry(open);
     return {
         refreshTheme() { library?.refreshTheme(); },
-        destroy() { close(); drawer.remove(); removeWand(); },
+        destroy() { close(); removeWand(); },
     };
 }

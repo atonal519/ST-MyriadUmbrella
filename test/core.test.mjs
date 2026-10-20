@@ -293,6 +293,30 @@ test('整楼显示序列不一致时，重复片段仍按点击处的实际出�
     assert.equal(span?.start, raw.lastIndexOf('好。'));
 });
 
+test('隐藏草稿中的重写和复查不阻止编辑可见正文，也不修改草稿', async () => {
+    const { locateText, replaceSpan } = await import(`${path}text-locate.js`);
+    const raw = '[DRAFT]重写：他推开门。\n复查：他推开门。[/DRAFT]\n正文：他推开门。';
+    const span = locateText(raw, '他推开门。', {
+        visibleText: '正文：他推开门。', beforeText: '正文：',
+        renderText: text => text.replace(/\[DRAFT\][\s\S]*?\[\/DRAFT\]/g, ''),
+    });
+    assert.equal(span?.start, raw.lastIndexOf('他推开门。'));
+    assert.equal(replaceSpan(raw, span, '他关上门。'), '[DRAFT]重写：他推开门。\n复查：他推开门。[/DRAFT]\n正文：他关上门。');
+});
+
+test('其他隐藏规则与正文重复台词按实际渲染和点击次序定位', async () => {
+    const { locateText } = await import(`${path}text-locate.js`);
+    const raw = '<private>好。</private>他说：**好。**\n她说：好。';
+    const span = locateText(raw, '好。', {
+        visibleText: '他说：好。她说：好。工具按钮', beforeText: '他说：好。她说：',
+        renderText: text => text.replace(/<private>[\s\S]*?<\/private>/g, ''),
+    });
+    assert.equal(span?.start, raw.lastIndexOf('好。'));
+    assert.equal(locateText('红色。\n蓝色。', '蓝色。', {
+        visibleText: '蓝色。蓝色。', beforeText: '', renderText: text => text.replace('红色。', '蓝色。'),
+    }), null, '被正则改写的文字不能冒充另一处原文');
+});
+
 test('保存更新当前候选、发出编辑事件，保留其他字段；两宿主走各自持久化接口', async () => {
     const { saveEditedMessage } = await import(`${path}host.js`);
     for (const modern of [true, false]) {
@@ -382,6 +406,57 @@ test('收纳样式重复对齐不反复写 style，移出后保留外部新增�
     const originalButton = { click() { clicked = true; } };
     actionTarget({ shadowRoot: { querySelector: () => originalButton } }).click();
     assert(clicked);
+});
+
+test('预设球使用运行中脚本返回的按钮事件，播放器无需显式列出按钮', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { activateCompatibleTarget, dockCompatibility } = await import(`${path}dock-compat.js`);
+    const previous = globalThis.SillyTavern;
+    const events = new EventEmitter();
+    let open = false;
+    events.on('runtime-button-event', () => { open = !open; });
+    globalThis.SillyTavern = { getContext: () => ({ eventSource: events }) };
+    const frame = { contentWindow: { getScriptName: () => '拉刻西斯播放器', getButtonEvent: name => name === '播放器' ? 'runtime-button-event' : '' } };
+    const element = {
+        matches: selector => selector === '#lx-player-host .lx-deck-launcher',
+        ownerDocument: { querySelectorAll: () => [frame] },
+        click() { throw new Error('普通 click 不会打开播放器'); },
+    };
+    try {
+        await activateCompatibleTarget(element, dockCompatibility(element));
+        assert.equal(open, true);
+        await activateCompatibleTarget(element, dockCompatibility(element));
+        assert.equal(open, false);
+    } finally { globalThis.SillyTavern = previous; }
+});
+
+test('兼容球收起移除命中框，展开不重复写样式，移出恢复容器层级', async () => {
+    const { holdTarget, placeTarget, releaseTarget } = await import(`${path}dock-targets.js`);
+    let writes = 0;
+    const style = entries => {
+        const values = new Map(entries);
+        return {
+            getPropertyValue: key => values.get(key)?.[0] || '', getPropertyPriority: key => values.get(key)?.[1] || '',
+            setProperty(key, value, priority = '') { writes++; values.set(key, [value, priority]); },
+            removeProperty(key) { writes++; values.delete(key); },
+        };
+    };
+    const container = { style: style([['z-index', ['1900000', '']]]) };
+    const element = { style: style([['display', ['flex', '']], ['left', ['20px', '']]]),
+        matches: selector => selector === '#lx-player-host .lx-deck-launcher', querySelector: () => null,
+        closest: () => container, getBoundingClientRect: () => ({ width: 36, height: 36 }),
+    };
+    const binding = holdTarget(element);
+    assert(Number(container.style.getPropertyValue('z-index')) > 1900000);
+    const rect = { left: 100, top: 200, width: 36, height: 36 };
+    placeTarget(binding, rect, false); assert.equal(element.style.getPropertyValue('display'), 'none');
+    placeTarget(binding, rect, true); assert.equal(element.style.getPropertyValue('display'), 'flex');
+    const count = writes; placeTarget(binding, rect, true); assert.equal(writes, count);
+    releaseTarget(binding);
+    assert.equal(element.style.getPropertyValue('display'), 'flex');
+    assert.equal(element.style.getPropertyValue('left'), '20px');
+    assert.equal(container.style.getPropertyValue('z-index'), '1900000');
+    assert.equal(container.style.getPropertyPriority('z-index'), '');
 });
 
 test('移动收纳球取消按压时不触发展开', async () => {

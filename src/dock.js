@@ -1,5 +1,6 @@
-import { DOCK_Z_INDEX, HUB_SIZE, RAIL_PADDING, SLOT_GAP, SLOT_SIZE, layoutDock, settleDock } from './dock-geometry.js';
-import { actionTarget, findTarget, fingerprint, floatingTarget, holdTarget, placeTarget, releaseTarget, targetKey } from './dock-targets.js';
+import { BALL_SIZE, DOCK_Z_INDEX, HUB_SIZE, RAIL_PADDING, SLOT_GAP, SLOT_SIZE, layoutDock, settleDock } from './dock-geometry.js';
+import { actionTarget, findTarget, fingerprint, floatingTarget, holdTarget, placeTarget, releaseTarget, suppressCoordinateStart, targetKey } from './dock-targets.js';
+import { activateCompatibleTarget, dockCompatibility, dropCompatibleTarget, prepareCompatibleTarget, NATIVE_DOCK_EVENT } from './dock-compat.js';
 import { readConfig, writeConfig } from './config.js';
 import { notify } from './host.js';
 import { bindPressActions } from './press.js';
@@ -28,6 +29,9 @@ const css = `
     .hub[aria-expanded=false][data-edge=left]::after{right:5px}.hub[aria-expanded=false][data-edge=right]::after{left:5px}
     .list{position:absolute;width:${SLOT_SIZE}px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;pointer-events:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:${SLOT_GAP}px}.list::-webkit-scrollbar{display:none}
     .slot{display:block;position:relative;flex:none;width:${SLOT_SIZE}px;height:${SLOT_SIZE}px;padding:0;border:0;border-radius:50%;background:transparent!important;touch-action:pan-y}
+    .slot[data-busy]::after{content:'';position:absolute;inset:${(SLOT_SIZE - BALL_SIZE) / 2}px;border-radius:50%;pointer-events:none;box-shadow:0 0 3px var(--tt-working-color);animation:dock-breathe 1.4s ease-in-out infinite}
+    @keyframes dock-breathe{0%,100%{opacity:.12}50%{opacity:.42}}
+    @media(prefers-reduced-motion:reduce){.slot[data-busy]::after{animation:none;opacity:.2}}
     .slot:hover,.slot:focus-visible{outline:1px solid color-mix(in srgb,var(--tt-accent) 45%,transparent);outline-offset:0}
     .slot.missing{border:1px dashed var(--tt-border)}.slot.missing::after{content:'·';opacity:.5}
     .empty{position:absolute;width:${SLOT_SIZE}px;height:${SLOT_SIZE}px;border-radius:50%;font-size:22px;padding:0;pointer-events:auto}
@@ -35,6 +39,20 @@ const css = `
     dialog{pointer-events:auto}
     .pick-note{position:absolute;left:50%;top:20px;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);padding:10px 14px;background:var(--tt-surface);border:1px solid var(--tt-border);border-radius:12px;pointer-events:auto}
 `;
+
+function paintGlow(control, slot, visible) {
+    // Work remains owned by the original plugin. The dock projects only its
+    // busy signal and color, keeping native static shadows inside the crop.
+    const busy = visible && (control.getAttribute('aria-busy') === 'true' || control.matches('.sp-fab-btn.sp-fab-busy,.sp-fab-btn.sp-btn-generating'));
+    if (slot.hasAttribute('data-busy') !== busy) slot.toggleAttribute('data-busy', busy);
+    // A color transition initially still reports the idle ink. Use its target
+    // color rather than freezing that first frame into the working glow.
+    const transition = busy ? control.getAnimations().find(animation => animation.transitionProperty === 'color') : null;
+    const color = busy ? transition?.effect.getKeyframes().at(-1).color || getComputedStyle(control).color : '';
+    if (slot.style.getPropertyValue('--tt-working-color') === color) return;
+    if (color) slot.style.setProperty('--tt-working-color', color);
+    else slot.style.removeProperty('--tt-working-color');
+}
 
 export function installDock() {
     const { host, root } = shadowHost('st-tools-dock', css);
@@ -82,6 +100,7 @@ export function installDock() {
             const rect = moving ? { left: itemDrag.x - SLOT_SIZE / 2, top: itemDrag.y - SLOT_SIZE / 2, width: SLOT_SIZE, height: SLOT_SIZE } : slot.getBoundingClientRect();
             const visible = moving || (open && rect.top >= listRect.top - 1 && rect.bottom <= listRect.bottom + 1);
             placeTarget(binding, rect, visible);
+            paintGlow(binding.control, slot, visible && !moving);
         }
     }
     function scheduleAlign() {
@@ -106,11 +125,16 @@ export function installDock() {
         Object.assign(empty.style, { left: `${listX}px`, top: `${Math.min(view.top + view.height - SLOT_SIZE - 6, y + HUB_SIZE + SLOT_GAP)}px` });
         scheduleAlign();
     }
-    function release(key, point) {
+    function release(key, point, pointer) {
         const binding = bindings.get(key);
         if (!binding) return;
         binding.observer.disconnect();
-        releaseTarget(binding, point);
+        const slot = slots.get(key);
+        if (slot) paintGlow(binding.control, slot, false);
+        if (point && pointer && binding.compatibility?.nativeDrop) {
+            releaseTarget(binding);
+            dropCompatibleTarget(binding.element, point, pointer);
+        } else releaseTarget(binding, point);
         bindings.delete(key);
     }
     function bindItems() {
@@ -122,7 +146,9 @@ export function installDock() {
             if (!element) continue;
             const binding = holdTarget(element);
             binding.observer = new MutationObserver(scheduleAlign);
-            binding.observer.observe(element, { attributes: true, attributeFilter: ['style', 'class'] });
+            const attributes = { attributes: true, attributeFilter: ['style', 'class', 'aria-busy'] };
+            binding.observer.observe(element, attributes);
+            if (binding.control !== element) binding.observer.observe(binding.control, attributes);
             bindings.set(item.key, binding);
         }
         for (const item of items) slots.get(item.key)?.classList.toggle('missing', !bindings.has(item.key));
@@ -141,19 +167,26 @@ export function installDock() {
             slot.className = 'slot';
             slot.title = item.name;
             slot.setAttribute('aria-label', `打开${item.name}`);
-            slot.addEventListener('click', event => {
-                event.stopPropagation();
+            const activate = async () => {
                 const binding = bindings.get(item.key);
                 if (!binding) { notify('暂时找不到这个悬浮球。请确认原球已显示，或在管理中移出后重新添加。', 'warning'); return; }
-                // The transparent slot owns the full button hit area. Click the
-                // actual original control (including an open shadow root), not
-                // an icon clone or the small center of a scaled live button.
-                actionTarget(binding.element).click();
+                // The slot owns the full hit area; activate the original
+                // plugin entry while its original control supplies the visual.
+                try {
+                    if (binding.compatibility) await activateCompatibleTarget(binding.element, binding.compatibility);
+                    else actionTarget(binding.element).click();
+                } catch (error) {
+                    console.error('[千机伞] 打开收纳球失败', error);
+                    notify(error.message || '打开这个悬浮球失败，请重试。', 'warning');
+                    return;
+                }
                 open = false;
                 paint();
-            });
+            };
+            slot.addEventListener('click', event => { event.stopPropagation(); void activate(); });
             slot.addEventListener('pointerdown', event => {
-                if (event.button !== 0 || !bindings.has(item.key)) return;
+                const binding = bindings.get(item.key);
+                if (event.button !== 0 || !binding) return;
                 itemDrag = { key: item.key, id: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, active: false };
             });
             slot.addEventListener('pointermove', event => {
@@ -173,12 +206,22 @@ export function installDock() {
                 if (!itemDrag || itemDrag.id !== event.pointerId) return;
                 const active = itemDrag.active;
                 itemDrag = null;
-                if (!active) return;
-                releasedPointer = event.pointerId;
+                if (!active) {
+                    const binding = bindings.get(item.key);
+                    if (event.type === 'pointerup' && binding?.compatibility && (event.pointerType === 'touch' || binding.compatibility.nativeDrop)) {
+                        if (binding.compatibility.nativeDrop) prepareCompatibleTarget(binding.element, event);
+                        // A collected touch control can finish without click;
+                        // consume any trailing click through the existing path.
+                        releasedPointer = event.pointerId;
+                        void activate();
+                    }
+                    return;
+                }
                 const rect = list.getBoundingClientRect();
                 const outside = event.clientX < rect.left - 12 || event.clientX > rect.right + 12 || event.clientY < rect.top - 12 || event.clientY > rect.bottom + 12;
-                if (event.type === 'pointerup' && outside) remove(item.key, { x: event.clientX, y: event.clientY });
+                if (event.type === 'pointerup' && outside) remove(item.key, { x: event.clientX, y: event.clientY }, event);
                 else scheduleAlign();
+                releasedPointer = event.pointerId;
             };
             slot.addEventListener('pointerup', finishItemDrag);
             slot.addEventListener('pointercancel', finishItemDrag);
@@ -197,8 +240,8 @@ export function installDock() {
         open = true;
         saveItems();
     }
-    function remove(key, point) {
-        release(key, point);
+    function remove(key, point, pointer) {
+        release(key, point, pointer);
         items = items.filter(item => item.key !== key);
         saveItems();
         renderManager();
@@ -288,6 +331,7 @@ export function installDock() {
         pick(false); add(element);
     };
     const onDown = event => {
+        if (event[NATIVE_DOCK_EVENT]) return;
         releasedPointer = null;
         if (event.composedPath().includes(host)) return;
         if (open) { open = false; paint(); }
@@ -296,6 +340,7 @@ export function installDock() {
     };
     const bindingsHas = element => Array.from(bindings.values()).some(binding => binding.element === element);
     const onUp = event => {
+        if (event[NATIVE_DOCK_EVENT]) return;
         const drag = externalDrag;
         externalDrag = null;
         if (!drag || drag.pointerId !== event.pointerId || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 12) return;
@@ -304,6 +349,24 @@ export function installDock() {
     };
     const onKey = event => { if (event.key === 'Escape') pick(false); };
     const cancelExternal = () => { externalDrag = null; };
+    const onPointerStart = event => {
+        if (event[NATIVE_DOCK_EVENT]) return;
+        const path = event.composedPath();
+        if (picking && !path.includes(host)) {
+            const target = floatingTarget(event);
+            if (target && dockCompatibility(target)) { releasedPointer = null; event.stopImmediatePropagation(); return; }
+        }
+        const point = event.touches?.[0] || event;
+        for (const binding of bindings.values()) {
+            if (!binding.compatibility?.coordinates) continue;
+            const rect = binding.element.getBoundingClientRect();
+            if (rect.width && point.clientX >= rect.left && point.clientX <= rect.right && point.clientY >= rect.top && point.clientY <= rect.bottom) {
+                suppressCoordinateStart(binding.element); scheduleAlign();
+            }
+        }
+    };
+    const pointerStarts = ['pointerdown', 'touchstart', 'mousedown'];
+    for (const name of pointerStarts) window.addEventListener(name, onPointerStart, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('pointerup', onUp, true);
@@ -329,6 +392,7 @@ export function installDock() {
         pick,
         reveal() { open = true; paint(); hub.focus({ preventScroll: true }); },
         destroy() {
+            for (const name of pointerStarts) window.removeEventListener(name, onPointerStart, true);
             cleanupSync(); cleanupPress(); observer.disconnect();
             clearTimeout(rebindTimer); cancelAnimationFrame(layoutFrame);
             for (const key of Array.from(bindings.keys())) release(key);
