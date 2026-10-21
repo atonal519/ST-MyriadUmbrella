@@ -4,5 +4,5 @@
   "private": true,
   "repository": { "type": "git", "url": "https://github.com/atonal519/ST-MyriadUmbrella.git" },
   "type": "module",
-  "scripts": { "test": "node test/core.test.mjs" }
+  "scripts": { "test": "node --test test/core.test.mjs" }
 }

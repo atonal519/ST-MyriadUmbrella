@@ -4,6 +4,26 @@ import { pathToFileURL } from 'node:url';
 
 const path = '../src/';
 
+test('卡库默认只读，显式偏好保存保留其他设置并在下次读取恢复', async () => {
+    const { readConfig, writeConfig } = await import(`${path}config.js`);
+    const previous = globalThis.SillyTavern;
+    let writes = 0;
+    const context = { extensionSettings: { other: { keep: 1 }, st_tavern_tools: { dock: true, custom: 2, charImage: 'abstract' } }, saveSettingsDebounced() { writes++; } };
+    globalThis.SillyTavern = { getContext: () => context };
+    try {
+        assert.equal(readConfig().charLayout, 'grid'); assert.equal(readConfig().charImage, undefined);
+        assert.equal(context.extensionSettings.st_tavern_tools.charImage, 'abstract', '读取不自动迁移旧设置');
+        assert.equal(writes, 0);
+        writeConfig({ charLayout: 'columns' });
+        assert.equal(writes, 1);
+        assert.equal(readConfig().charLayout, 'columns'); assert.equal(context.extensionSettings.st_tavern_tools.charImage, undefined, '下一次显式保存自然移除废弃自有字段');
+        assert.equal(context.extensionSettings.st_tavern_tools.dock, true);
+        assert.equal(context.extensionSettings.st_tavern_tools.custom, 2);
+        assert.deepEqual(context.extensionSettings.other, { keep: 1 });
+        assert(!JSON.stringify(context.extensionSettings).includes('data:image/'));
+    } finally { globalThis.SillyTavern = previous; }
+});
+
 test('文件夹只归类卡片引用，批量移动和删除不改角色数据或其他设置', async () => {
     const { groupLibraryCards, saveLibraryFolder, moveLibraryCards, deleteLibraryFolder } = await import(`${path}folders.js`);
     const previous = globalThis.SillyTavern;
