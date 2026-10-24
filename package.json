@@ -4,5 +4,6 @@
   "private": true,
   "repository": { "type": "git", "url": "https://github.com/atonal519/ST-MyriadUmbrella.git" },
   "type": "module",
-  "scripts": { "test": "node --test test/core.test.mjs" }
+  "scripts": { "build": "node scripts/build.mjs", "test": "node --test test/core.test.mjs" },
+  "devDependencies": { "webpack": "5.106.1" }
 }

@@ -3,7 +3,7 @@
   "loading_order": 200,
   "requires": [],
   "optional": [],
-  "js": "index.js",
+  "js": "src/runtime.bundle.js",
   "author": "Atonal",
   "version": "0.1.0",
   "auto_update": false,

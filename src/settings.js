@@ -34,7 +34,7 @@ export function mountToolbox(root, { apply, manageDock, addDock, revealDock }) {
             await setQuickRepliesEnabled(qr.checked, undefined, qr.dataset.qr);
         } catch (error) {
             console.error('[千机伞] 更改 QR 显示失败', error);
-            notify(globalThis.quickReplyApi ? '更改 QR 显示失败，请重试。' : error.message, 'warning');
+            notify(error.name === 'QuickReplyRenameError' || !globalThis.quickReplyApi ? error.message : '更改 QR 显示失败，请重试。', 'warning');
         } finally { refresh(); for (const input of replies) input.disabled = false; }
     });
     return { refresh };

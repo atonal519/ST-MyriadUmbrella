@@ -2,7 +2,7 @@ import { readConfig } from './src/config.js';
 import { installDock } from './src/dock.js';
 import { installEditor } from './src/editor.js';
 import { getHost, notify } from './src/host.js';
-import { registerCommands } from './src/reroll.js';
+import { migrateQuickReplies, registerCommands } from './src/reroll.js';
 import { installHome } from './src/home.js';
 import { applyToast } from './src/toast.js';
 import { installTheme } from './src/theme.js';
@@ -41,10 +41,13 @@ function init() {
         revealDock: () => dock ? dock.reveal() : notify('先勾选“悬浮球收纳”，再显示收纳球。'),
     });
     registerCommands();
+    void migrateQuickReplies().catch(error => { console.error('[千机伞] QR 集合更名失败', error); notify(error.message, 'warning'); });
     apply();
 }
 
 export function disable() {
+    const ctx = getHost();
+    ctx.eventSource.removeListener(ctx.eventTypes.APP_READY, init);
     cleanupCharacterFolders?.(); cleanupCharacterFolders = null;
     cleanupPresetToggles?.(); cleanupPresetToggles = null;
     home?.destroy(); home = null;

@@ -4,6 +4,34 @@ import { pathToFileURL } from 'node:url';
 
 const path = '../src/';
 
+test('就绪前停用后不再初始化，并保留其他插件的就绪监听', async () => {
+    const previous = { host: globalThis.SillyTavern, document: globalThis.document, storage: globalThis.localStorage };
+    globalThis.localStorage = { getItem: () => null };
+    const { EventEmitter } = await import('../../../../../lib/eventemitter.js');
+    const eventSource = new EventEmitter();
+    let initializedNodes = 0;
+    let otherReadyCalls = 0;
+    const context = { eventSource, eventTypes: { APP_READY: 'ready' } };
+    globalThis.SillyTavern = { getContext: () => context };
+    globalThis.document = {
+        getElementById: () => null,
+        documentElement: { removeAttribute() {} },
+        createElement() { initializedNodes++; throw new Error('停用后仍然创建千机伞界面'); },
+    };
+    eventSource.on('ready', () => { otherReadyCalls++; });
+    try {
+        const { disable } = await import('../index.js?disabled-before-ready');
+        disable();
+        await eventSource.emit('ready');
+        assert.equal(initializedNodes, 0, '停用后的 APP_READY 不得重新创建界面或收纳');
+        assert.equal(otherReadyCalls, 1, '只移除千机伞自己的就绪回调');
+    } finally {
+        globalThis.SillyTavern = previous.host;
+        globalThis.document = previous.document;
+        globalThis.localStorage = previous.storage;
+    }
+});
+
 test('卡库默认只读，显式偏好保存保留其他设置并在下次读取恢复', async () => {
     const { readConfig, writeConfig } = await import(`${path}config.js`);
     const previous = globalThis.SillyTavern;
@@ -204,6 +232,7 @@ test('QR 勾选显示两按钮、取消隐藏，重选不重复添加或覆盖�
     await installQuickReplies(api);
     assert.equal(sets.size, 1);
     const set = [...sets.values()][0];
+    assert.equal(set.name, '千机伞');
     assert.equal(set.injectInput, false);
     assert.equal(set.disableSend, false);
     assert.deepEqual(set.qrList.map(qr => [qr.label, qr.message, qr.isHidden]), [['重新生成', '/tt-reroll', false], ['回退输入', '/tt-retract', false]]);
@@ -243,6 +272,121 @@ test('QR 勾选显示两按钮、取消隐藏，重选不重复添加或覆盖�
     await setQuickRepliesEnabled(true, api, '重新生成');
     assert.equal(quickRepliesEnabled(api, '重新生成'), true);
     assert.equal(quickRepliesEnabled(api, '回退输入'), false, '只打开所选按钮');
+});
+
+function qrUpgradeFixture() {
+    const rows = [
+        { id: 7, label: '重新生成', message: '/tt-reroll', isHidden: false },
+        { id: 12, label: '回退输入', message: '/tt-retract', isHidden: true },
+        { id: 19, label: '自己的按钮', message: '/echo 保留', isHidden: false },
+    ];
+    const set = { name: '酒馆工具箱', disableSend: true, injectInput: true, placeBeforeInput: true, color: '#123456', idIndex: 19, qrList: rows,
+        toJSON() { return { version: 2, name: this.name, disableSend: this.disableSend, injectInput: this.injectInput, placeBeforeInput: this.placeBeforeInput, color: this.color, idIndex: this.idIndex, qrList: this.qrList }; }, async save() {} };
+    const sets = [set];
+    const links = [{ set, isVisible: false }];
+    const persisted = new Map([[set.name, structuredClone(set.toJSON())]]);
+    const calls = [];
+    let saves = 0;
+    const assistant = { whitelist: ['other', 'QRV2::酒馆工具箱'], groupOrder: { left: ['A', '酒馆工具箱', 'B'], right: ['C'] }, enabled: false, keep: { value: 1 } };
+    const context = { extensionSettings: { 'qr-assistant': assistant, unrelated: { keep: true } }, getRequestHeaders: () => ({ 'Content-Type': 'application/json', 'X-Test': 'local' }) };
+    const api = {
+        getSetByName: name => sets.find(item => item.name === name),
+        getQrByLabel: (name, label) => sets.find(item => item.name === name)?.qrList.find(qr => qr.label === label),
+        updateQuickReply(name, label, patch) { Object.assign(this.getQrByLabel(name, label), patch); },
+        removeGlobalSet(name) { const index = links.findIndex(link => link.set.name === name); if (index >= 0) links.splice(index, 1); },
+        settings: { isEnabled: false, config: { setList: links }, chatConfig: { setList: [{ set, isVisible: true }] }, characterConfigs: { existing: { setList: [{ set, isVisible: false }] } }, save() { saves++; } },
+        settingsUi: { rerender() {} },
+    };
+    const fetcher = async (url, options) => {
+        const value = JSON.parse(options.body); calls.push({ url, value, headers: options.headers });
+        if (url.endsWith('/save')) persisted.set(value.name, structuredClone(value));
+        else if (url.endsWith('/delete')) persisted.delete(value.name);
+        else throw new Error('unexpected endpoint');
+        return { ok: true };
+    };
+    return { set, sets, links, rows, persisted, calls, assistant, context, api, fetcher, saves: () => saves };
+}
+
+test('QR 旧集合更名保留对象、按钮和显示偏好，持久化先存新名再清旧名并迁移助手引用', async () => {
+    const { migrateQuickReplies, quickRepliesEnabled } = await import(`${path}reroll.js`);
+    const f = qrUpgradeFixture();
+    f.rows[0].message = '/echo 自改命令'; f.rows[1].label = '自己改名的回退'; f.rows[1].message = '/echo 自改回退';
+    const previous = globalThis.SillyTavern;
+    globalThis.SillyTavern = { getContext: () => f.context };
+    try {
+        f.api.settings.isEnabled = true; f.links[0].isVisible = true;
+        assert.equal(quickRepliesEnabled(f.api, '重新生成'), true, '迁移前仍能读取旧集合');
+        await migrateQuickReplies(f.api, f.fetcher);
+        assert.deepEqual(f.calls.map(call => call.url), ['/api/quick-replies/save', '/api/quick-replies/delete']);
+        assert.equal(f.calls[0].headers['X-Test'], 'local');
+        assert.equal(f.persisted.has('酒馆工具箱'), false);
+        assert.deepEqual([...f.persisted.keys()], ['千机伞']);
+        assert.equal(f.set.name, '千机伞');
+        assert.equal(f.links[0].set, f.set); assert.equal(f.api.settings.chatConfig.setList[0].set, f.set);
+        assert.equal(f.api.settings.characterConfigs.existing.setList[0].set, f.set);
+        assert.equal(f.set.qrList, f.rows); assert.equal(f.set.qrList[1].id, 12); assert.equal(f.set.qrList[1].isHidden, true);
+        assert.equal(f.set.qrList[0].message, '/echo 自改命令'); assert.equal(f.set.qrList[1].label, '自己改名的回退');
+        assert.equal(f.set.qrList[2].message, '/echo 保留'); assert.equal(f.set.disableSend, true); assert.equal(f.set.injectInput, true);
+        assert.equal(f.api.settings.isEnabled, true); assert.equal(f.links[0].isVisible, true);
+        assert.deepEqual(f.assistant, { whitelist: ['other', 'QRV2::千机伞'], groupOrder: { left: ['A', '千机伞', 'B'], right: ['C'] }, enabled: false, keep: { value: 1 } });
+        assert.deepEqual(f.context.extensionSettings.unrelated, { keep: true });
+        const writes = f.calls.length;
+        await migrateQuickReplies(f.api, f.fetcher);
+        assert.equal(f.calls.length, writes); assert.equal(f.saves(), 1);
+        const coldNames = [...f.persisted.values()].map(value => value.name);
+        assert.deepEqual(coldNames, ['千机伞'], '重载只会读到新集合');
+    } finally { globalThis.SillyTavern = previous; }
+});
+
+test('QR 升级不创建空集合或未安装助手配置，真实同名冲突不覆盖', async () => {
+    const { migrateQuickReplies } = await import(`${path}reroll.js`);
+    const f = qrUpgradeFixture();
+    const previous = globalThis.SillyTavern;
+    globalThis.SillyTavern = { getContext: () => f.context };
+    try {
+        f.sets.length = 0;
+        await migrateQuickReplies(f.api, f.fetcher); assert.equal(f.calls.length, 0);
+        f.sets.push(f.set);
+        f.sets.push({ name: '千机伞', qrList: [] });
+        await assert.rejects(migrateQuickReplies(f.api, f.fetcher), /同名|名为.*千机伞/);
+        assert.equal(f.calls.length, 0); assert.equal(f.set.name, '酒馆工具箱');
+        f.sets.pop(); delete f.context.extensionSettings['qr-assistant'];
+        await migrateQuickReplies(f.api, f.fetcher);
+        assert.equal(Object.hasOwn(f.context.extensionSettings, 'qr-assistant'), false);
+        assert.equal(f.api.settings.isEnabled, false); assert.equal(f.links[0].isVisible, false);
+    } finally { globalThis.SillyTavern = previous; }
+});
+
+test('QR 更名保存失败不删除旧集合，清旧失败准确保留未完成事实', async () => {
+    const { migrateQuickReplies } = await import(`${path}reroll.js`);
+    const previous = globalThis.SillyTavern;
+    try {
+        for (const failAt of ['save', 'delete']) {
+            const f = qrUpgradeFixture(); globalThis.SillyTavern = { getContext: () => f.context };
+            const seen = [];
+            await assert.rejects(migrateQuickReplies(f.api, async (url, options) => { seen.push(url); return url.endsWith('/' + failAt) ? { ok: false } : f.fetcher(url, options); }), failAt === 'save' ? /保存|更名失败/ : /旧集合.*删除|删除.*旧集合/);
+            assert.deepEqual(seen, failAt === 'save' ? ['/api/quick-replies/save'] : ['/api/quick-replies/save', '/api/quick-replies/delete']);
+            assert.equal(f.persisted.has('酒馆工具箱'), true); assert.equal(f.set.name, '酒馆工具箱');
+            assert.equal(f.persisted.has('千机伞'), failAt === 'delete');
+            assert.deepEqual(f.assistant.whitelist, ['other', 'QRV2::酒馆工具箱']); assert.equal(f.saves(), 0);
+        }
+    } finally { globalThis.SillyTavern = previous; }
+});
+
+test('启动更名与手动 QR 开关共用一次在途更名，结束后不保留任务引用', async () => {
+    const { migrateQuickReplies, setQuickRepliesEnabled } = await import(`${path}reroll.js`);
+    const f = qrUpgradeFixture(); const previous = globalThis.SillyTavern;
+    globalThis.SillyTavern = { getContext: () => f.context };
+    let release;
+    const wait = new Promise(resolve => { release = resolve; });
+    try {
+        const pending = migrateQuickReplies(f.api, async (url, options) => { if (url.endsWith('/save')) await wait; return f.fetcher(url, options); });
+        const toggled = setQuickRepliesEnabled(false, f.api, '重新生成');
+        release(); await Promise.all([pending, toggled]);
+        assert.deepEqual(f.calls.map(call => call.url), ['/api/quick-replies/save', '/api/quick-replies/delete']);
+        assert.equal(f.rows[0].isHidden, true); assert.equal(f.rows[1].isHidden, true); assert.equal(f.rows[2].isHidden, false);
+        await migrateQuickReplies(f.api, f.fetcher); assert.equal(f.calls.length, 2);
+    } finally { globalThis.SillyTavern = previous; }
 });
 
 test('收起贴边只露出 14px，展开后所有入口向下且留在屏幕内', async () => {
