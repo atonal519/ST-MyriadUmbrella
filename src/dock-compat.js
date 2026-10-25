@@ -8,7 +8,12 @@ const targets = [
     { selector: '.lx-cat-ball', nativeDrop: true },
 ];
 
+const jmReader = { elementId: 'tw-jm-reader', nativeDrop: true };
+
 export function dockCompatibility(element) {
+    const root = element.getRootNode?.();
+    // Only the reader's original orb is collected; its full-screen host and panel stay put.
+    if (element.id === 'orb' && root?.host?.id === jmReader.elementId && root.host.shadowRoot === root) return jmReader;
     return targets.find(target => element.matches(target.selector));
 }
 

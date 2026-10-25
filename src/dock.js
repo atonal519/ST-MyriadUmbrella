@@ -147,6 +147,7 @@ export function installDock() {
             const binding = holdTarget(element);
             binding.observer = new MutationObserver(scheduleAlign);
             const attributes = { attributes: true, attributeFilter: ['style', 'class', 'aria-busy'] };
+            if (binding.compatibility?.elementId === 'tw-jm-reader') attributes.attributeFilter.push('hidden');
             binding.observer.observe(element, attributes);
             if (binding.control !== element) binding.observer.observe(binding.control, attributes);
             bindings.set(item.key, binding);
@@ -188,6 +189,7 @@ export function installDock() {
                 const binding = bindings.get(item.key);
                 if (event.button !== 0 || !binding) return;
                 itemDrag = { key: item.key, id: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, active: false };
+                slot.setPointerCapture(event.pointerId);
             });
             slot.addEventListener('pointermove', event => {
                 if (!itemDrag || itemDrag.id !== event.pointerId) return;

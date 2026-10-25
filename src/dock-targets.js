@@ -9,7 +9,7 @@ const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
 
 export function fingerprint(element) {
     const compatibility = dockCompatibility(element);
-    if (compatibility) return { elementId: '', scriptId: '', classSelector: compatibility.selector, title: clean(element.getAttribute('title') || element.getAttribute('aria-label')) };
+    if (compatibility) return { elementId: compatibility.elementId || '', scriptId: '', classSelector: compatibility.selector || '', title: clean(element.getAttribute('title') || element.getAttribute('aria-label')) };
     const classes = Array.from(element.classList || []).filter(token => !/^(active|open|hover|focus|dragging|ui-)/i.test(token)).slice(0, 4);
     return {
         elementId: element.id || '',
@@ -31,6 +31,7 @@ export function actionTarget(element) {
 }
 
 export function findTarget(value, documentRef = document) {
+    if (value.elementId === 'tw-jm-reader') return documentRef.getElementById(value.elementId)?.shadowRoot?.getElementById('orb') || null;
     if (value.elementId) return documentRef.getElementById(value.elementId);
     const selector = value.scriptId
         ? `[script_id="${CSS.escape(value.scriptId)}"]${value.classSelector || ''}`
@@ -45,6 +46,7 @@ export function floatingTarget(event) {
     if (path.some(element => element?.id?.startsWith('st-tools-'))) return null;
     for (const element of path) {
         if (!(element instanceof Element) || element.closest(excluded)) continue;
+        if (dockCompatibility(element)?.elementId === 'tw-jm-reader') return element;
         // A shadow visual is not addressable by the document fingerprint.
         // Own its outer floating host, which also retains the plugin handlers.
         if (element.getRootNode() !== document) continue;
