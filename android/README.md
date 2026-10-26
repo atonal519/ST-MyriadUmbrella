@@ -1,12 +1,12 @@
 # 千机伞 Android
 
-当前试用版：**0.1.7-trial**（versionCode 8）。
+当前试用版：**0.1.8-trial**（versionCode 9）。
 
 源码与构建文件已提供，APK 与线上更新清单正在准备发布。发布后可从 [Releases](https://github.com/atonal519/ST-MyriadUmbrella/releases) 下载安装包。
 
 Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。线上更新源发布后，0.1.6 起可在首页右上角检查、下载更新，再按系统提示安装。
 
-这是连接自有 SillyTavern / Luker 服务端的 WebView 浏览器。首页集中放置连接、服务端插件状态、卡库与设置。返回首页会保留当前酒馆页，点“返回酒馆”继续原页面；需要重新加载时，先点“关闭页面”再进入。
+这是连接自有 SillyTavern / Luker 服务端的 WebView 浏览器。首页集中放置连接、服务端插件状态、卡库与设置。返回首页会保留当前酒馆页，点右侧“返回酒馆”继续原页面；需要重新加载时，先点左侧“关闭页面”再进入。
 
 - 卡库每行四张，支持搜索、开场白分页和手动刷新，复用本次已读取的列表、详情和封面。
 - 后台保活、悬浮球分别设置。偏好、加载 GIF、图标与本地页面日夜颜色由 App 管理。
@@ -21,7 +21,7 @@ cd android/tavernium
 ./gradlew lintDebug assembleDebug
 ```
 
-安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.1.7-trial.apk`。本地重新构建会使用构建者自己的签名；仓库不包含发布签名密钥。
+安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.1.8-trial.apk`。本地重新构建会使用构建者自己的签名；仓库不包含发布签名密钥。
 
 ## 发布更新
 
@@ -31,7 +31,7 @@ APK 版本和 versionCode 在 `tavernium/app/build.gradle` 中维护。发布时
 2. 用 Android SDK 的 `aapt2`、`apksigner` 加入 PATH 后运行：
 
    ```sh
-   python3 scripts/create-trial-update.py qianjisan-0.1.7-trial.apk \
+   python3 scripts/create-trial-update.py qianjisan-0.1.8-trial.apk \
      --notes '本次更新说明' --output qianjisan-trial-update.json
    ```
 
