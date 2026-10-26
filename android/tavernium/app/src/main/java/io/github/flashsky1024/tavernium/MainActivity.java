@@ -48,7 +48,6 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -69,6 +68,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.nio.charset.StandardCharsets;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final String TAG = "TavernKeep";
@@ -196,6 +196,9 @@ public class MainActivity extends Activity {
     private static final int LOG_EXPORT_REQUEST = 1004;
     private static final int UPDATE_INSTALL_REQUEST = 1005;
     private boolean updateChecking;
+    private UpdateManager.Release offeredUpdate;
+    private java.util.concurrent.atomic.AtomicBoolean updateDownloadCancel;
+    private boolean updatePermissionOpening;
     private UpdateManager.Release pendingUpdate;
     private File pendingUpdateApk;
 
@@ -312,6 +315,7 @@ public class MainActivity extends Activity {
             public void exportLog() { exportPerfLog(); }
             public void pickImage(String target) { chooseLocalImage(target); }
             public void checkUpdates(java.util.function.BiConsumer<String,String> completed) { MainActivity.this.checkUpdates(completed); }
+            public void appUpdateAction(String operation) { MainActivity.this.appUpdateAction(operation); }
         }, this.appearance);
         if (this.serverUrl.isEmpty()) showHome();
         else enterBrowser();
@@ -2128,6 +2132,7 @@ public class MainActivity extends Activity {
     // ---------------- 用户手动检查 APK 更新 ----------------
 
     private void checkUpdates(java.util.function.BiConsumer<String,String> completed) {
+        if(updateDownloadCancel!=null){completed.accept(null,"正在下载更新，请稍候。");return;}
         if (updateChecking) { completed.accept(null,"正在检查更新，请稍候。"); return; }
         updateChecking=true;
         new Thread(() -> {
@@ -2159,34 +2164,77 @@ public class MainActivity extends Activity {
 
     private void confirmUpdate(UpdateManager.Release release) {
         if(release.versionCode<=BuildConfig.VERSION_CODE)return;
-        String message="版本："+release.versionName+"\n大小："+UpdateManager.formatSize(release.size);
-        if(!release.notes.isEmpty())message+="\n\n"+release.notes;
-        new AlertDialog.Builder(this).setTitle("发现新版本").setMessage(message)
-                .setPositiveButton("下载并安装",(dialog,which)->startUpdateDownload(release))
-                .setNegativeButton("取消",null).show();
+        offeredUpdate=release;
+        pendingUpdate=null;pendingUpdateApk=null;
+        updateState("available","",0,0);
+    }
+
+    private void updateState(String phase,String message,int percent,long downloaded) {
+        if(homeController==null||isFinishing()||isDestroyed())return;
+        try {
+            JSONObject value=new JSONObject().put("phase",phase).put("message",message)
+                    .put("percent",percent).put("downloaded",UpdateManager.formatSize(downloaded));
+            if(offeredUpdate!=null)value.put("version",offeredUpdate.versionName)
+                    .put("size",UpdateManager.formatSize(offeredUpdate.size)).put("notes",offeredUpdate.notes);
+            homeController.updateChanged(value);
+        }catch(org.json.JSONException ignored){}
+    }
+
+    private void appUpdateAction(String operation) {
+        switch(operation) {
+            case "download":
+                if(offeredUpdate==null)throw new IllegalStateException("请先检查更新。");
+                if(updateDownloadCancel==null)startUpdateDownload(offeredUpdate);
+                return;
+            case "cancel":
+                if(updateDownloadCancel!=null){updateDownloadCancel.set(true);updateState("cancelling","正在取消下载…",0,0);}
+                return;
+            case "install":
+                if(pendingUpdate==null||pendingUpdateApk==null)throw new IllegalStateException("请先下载安装包。");
+                requestUpdateInstall(pendingUpdate,pendingUpdateApk);return;
+            case "permission":
+                if(pendingUpdate==null||pendingUpdateApk==null)throw new IllegalStateException("请先下载安装包。");
+                if(Build.VERSION.SDK_INT<26||UpdateManager.canInstall(this)){requestUpdateInstall(pendingUpdate,pendingUpdateApk);return;}
+                if(updatePermissionOpening)return;
+                try {
+                    updatePermissionOpening=true;
+                    Intent intent=new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:"+getPackageName()));
+                    startActivityForResult(intent,UPDATE_INSTALL_REQUEST);
+                } catch(Exception error) {
+                    updatePermissionOpening=false;
+                    updateState("permission","无法打开安装权限设置，请在系统应用设置中允许千机伞安装应用。",0,0);
+                }
+                return;
+            default:throw new IllegalArgumentException("请选择更新操作。");
+        }
     }
 
     private void startUpdateDownload(UpdateManager.Release release) {
-        ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(100);
+        if(release.versionCode<=BuildConfig.VERSION_CODE||updateDownloadCancel!=null)return;
         java.util.concurrent.atomic.AtomicBoolean cancel=new java.util.concurrent.atomic.AtomicBoolean();
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("正在下载 "+release.versionName)
-                .setView(bar).setCancelable(false).setNegativeButton("取消下载",(d,w)->cancel.set(true)).create();
-        dialog.setOnDismissListener(d->cancel.set(true));dialog.show();
+        updateDownloadCancel=cancel;
+        updateState("downloading","",0,0);
         new Thread(()->{
             try {
-                File apk=UpdateManager.download(this,release,(percent,done,total)->runOnUiThread(()->bar.setProgress(percent)),cancel);
+                File apk=UpdateManager.download(this,release,(percent,done,total)->runOnUiThread(()->{
+                    if(updateDownloadCancel==cancel&&!cancel.get())updateState("downloading","",percent,done);
+                }),cancel);
                 runOnUiThread(()->{
-                    boolean cancelled=cancel.get();dialog.dismiss();
-                    if(!cancelled && !isFinishing() && !isDestroyed())requestUpdateInstall(release,apk);
+                    if(updateDownloadCancel!=cancel)return;
+                    updateDownloadCancel=null;
+                    if(cancel.get()){updateState("cancelled","下载已取消。",0,0);return;}
+                    if(!isFinishing()&&!isDestroyed()){
+                        pendingUpdate=release;pendingUpdateApk=apk;
+                        requestUpdateInstall(release,apk);
+                    }
                 });
             } catch(Exception error) {
-                boolean cancelled=cancel.get();
-                PerfLog.i("AppUpdate",cancelled?"download cancelled":"download failed type="+error.getClass().getSimpleName());
+                PerfLog.i("AppUpdate",cancel.get()?"download cancelled":"download failed type="+error.getClass().getSimpleName());
                 runOnUiThread(()->{
-                    dialog.dismiss();
-                    if(!cancelled && !isFinishing() && !isDestroyed())new AlertDialog.Builder(this)
-                            .setTitle("下载未完成").setMessage(updateFailure(error)).setPositiveButton("知道了",null).show();
+                    if(updateDownloadCancel!=cancel)return;
+                    updateDownloadCancel=null;
+                    updateState(cancel.get()?"cancelled":"error",cancel.get()?"下载已取消。":updateFailure(error),0,0);
                 });
             }
         },"qianjisan-update-download").start();
@@ -2194,24 +2242,12 @@ public class MainActivity extends Activity {
 
     private void requestUpdateInstall(UpdateManager.Release release,File apk) {
         if(Build.VERSION.SDK_INT<26 || UpdateManager.canInstall(this)){installApk(apk);return;}
-        new AlertDialog.Builder(this).setTitle("允许安装更新")
-                .setMessage("请允许千机伞安装应用。返回后继续安装，已下载的安装包会保留。")
-                .setPositiveButton("去设置",(dialog,which)->{
-                    pendingUpdate=release;pendingUpdateApk=apk;
-                    try {
-                        Intent intent=new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                Uri.parse("package:"+getPackageName()));
-                        startActivityForResult(intent,UPDATE_INSTALL_REQUEST);
-                    } catch(Exception error) {
-                        pendingUpdate=null;pendingUpdateApk=null;
-                        Toast.makeText(this,"无法打开安装权限设置，请在系统应用设置中允许千机伞安装应用。",Toast.LENGTH_LONG).show();
-                    }
-                }).setNegativeButton("取消",(dialog,which)->{pendingUpdate=null;pendingUpdateApk=null;}).show();
+        updateState("permission","请允许千机伞安装应用。返回后继续安装，已下载的安装包会保留。",0,0);
     }
 
     private void installApk(File apk) {
-        if(!UpdateManager.install(this,apk))new AlertDialog.Builder(this).setTitle("无法打开安装器")
-                .setMessage("请检查手机的应用安装权限后重试。").setPositiveButton("知道了",null).show();
+        updateState("ready","安装包已下载，按系统提示完成更新。",100,offeredUpdate==null?0:offeredUpdate.size);
+        if(!UpdateManager.install(this,apk))updateState("ready","无法打开安装器，请检查手机的应用安装权限后重试。",100,0);
     }
 
     /** 下载走独立线程，边下边写盘，不再把整个文件读进内存（聊天记录导出可能几十 MB）。 */
@@ -2509,11 +2545,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int i, int i2, Intent intent) {
         if(i==UPDATE_INSTALL_REQUEST) {
+            updatePermissionOpening=false;
             UpdateManager.Release release=pendingUpdate;File apk=pendingUpdateApk;
-            pendingUpdate=null;pendingUpdateApk=null;
             if(release!=null && apk!=null) {
                 if(UpdateManager.canInstall(this))installApk(apk);
-                else Toast.makeText(this,"安装权限未开启，允许后才能安装更新。安装包已保留。",Toast.LENGTH_LONG).show();
+                else updateState("permission","安装权限未开启。允许后可继续安装，安装包已保留。",0,0);
             }
             return;
         }
@@ -2946,6 +2982,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if(updateDownloadCancel!=null)updateDownloadCancel.set(true);
         closeBrowser();
         if (this.homeController != null) this.homeController.dispose();
         if (this.idleController != null) { this.idleController.dispose(); this.idleController = null; }

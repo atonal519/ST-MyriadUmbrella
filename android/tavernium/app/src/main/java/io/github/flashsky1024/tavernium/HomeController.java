@@ -30,6 +30,7 @@ final class HomeController {
         void clearLegacyCache(); void openSystemPermission(String target);
         void exportLog(); void pickImage(String target);
         void checkUpdates(java.util.function.BiConsumer<String,String> completed);
+        void appUpdateAction(String operation);
     }
     private static final String ORIGIN = "https://bainiao.local";
     private final Activity activity;
@@ -42,6 +43,7 @@ final class HomeController {
     private final LocalAppearance appearance;
     private final ServerPluginApi pluginApi = new ServerPluginApi();
     private WebView view;
+    private JSONObject appUpdate;
     private String csrf = "";
     private String csrfOrigin = "";
 
@@ -85,6 +87,10 @@ final class HomeController {
     void dispose(){destroyView();io.shutdown();libraryIo.shutdown();}
     void back(Runnable finish){if(view==null){finish.run();return;}view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.back()",value->{if(!"true".equals(value))finish.run();});}
     void stateChanged(){if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.stateChanged("+state()+")",null);}
+    void updateChanged(JSONObject value){
+        appUpdate=value;
+        if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.updateChanged("+value+")",null);
+    }
     void visibilityChanged(boolean visible){
         if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.setVisible("+visible+")",null);
     }
@@ -98,6 +104,7 @@ final class HomeController {
             value.put("username",connection.username);
             value.put("password",connection.password);
             value.put("version",BuildConfig.VERSION_NAME);
+            if(appUpdate!=null)value.put("appUpdate",appUpdate);
             value.put("frameRate",prefs.getInt("frame_rate_limit",0));
             value.put("idleMode",IdleController.readMode(prefs));
             value.put("perfMonitor",prefs.getBoolean("perf_monitor",false));
@@ -166,6 +173,7 @@ final class HomeController {
                         replyTo(destination,id,result,error);
                     });return;
                 }
+                case "appUpdateAction":host.appUpdateAction(data.getString("operation"));reply(id,new JSONObject(),null);return;
                 case "saveConnection":{
                     ConnectionSettings.Saved before=ConnectionSettings.read(prefs);
                     String url=data.getString("url").trim();

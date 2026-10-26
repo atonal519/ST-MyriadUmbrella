@@ -3,6 +3,7 @@
  const root=document.getElementById('bn-home-preview'), get=id=>document.getElementById(id);
  const pending=new Map();let nextId=0,state={},cards=[],cardsSourceKey='',cardsLoaded=false,currentView='home',editDirty=false,currentDetail=null,coverObserver=null;
  const names={ink:'墨伞',stone:'白鳥',moss:'青伞',bluebird:'蓝翼',redbird:'剪纸'};
+ let updateActionBusy=false,updateOperation='';
  const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
  const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
  systemTheme.addEventListener('change',()=>{if(typeof state.dark!=='boolean')bainiaoRainGlass.render(systemTheme.matches);});
@@ -89,10 +90,11 @@ SOFTWARE.
   currentView=view;root.dataset.view=view;get('bn-home').hidden=view!=='home';get('bn-system-page').hidden=view!=='system';get('bn-library-page').hidden=view!=='library';feedback('');updateLoadingPreview();window.scrollTo(0,0);
  }
  window.BainiaoApp={ready:false,resolve(id,result){const task=pending.get(id);if(!task)return;pending.delete(id);result.ok?task.resolve(result.value):task.reject(new Error(result.error||'操作未完成，请重试。'));},back(){
+  if(get('bn-update-dialog').open){closeUpdate();return true;}
   if(get('bn-connection-dialog').open){closeEdit();return true;}
   if(!get('bn-card-detail').hidden){closeDetail();return true;}
   if(currentView!=='home'){showView('home');return true;}return false;
- },stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}state={...state,...value};render();},setVisible(visible){root.dataset.hostVisible=visible?'true':'false';updateLoadingPreview();}};
+ },updateChanged(value){state.appUpdate=value;updateActionBusy=false;renderUpdate();if(['available','permission','ready','error'].includes(value.phase))openUpdate();},stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}state={...state,...value};render();},setVisible(visible){root.dataset.hostVisible=visible?'true':'false';updateLoadingPreview();}};
  function render(){
   get('bn-url').value=state.url||'';if(get('bn-connection-dialog').open&&!editDirty)fillEdit();
   if(typeof state.dark==='boolean'){root.dataset.theme=state.dark?'dark':'light';document.documentElement.style.colorScheme=state.dark?'dark':'light';document.documentElement.style.backgroundColor=state.dark?'#1d1e1a':'#f7f6f1';}
@@ -106,7 +108,7 @@ SOFTWARE.
   get('bn-frame-summary').textContent=state.frameRate?state.frameRate+' fps':'跟随系统';get('bn-idle-summary').textContent=['关闭','普通','防烧屏'][state.idleMode||0];get('bn-version').textContent=state.version||'';get('bn-app-update-version').textContent=state.version?'v'+state.version:'';
   root.querySelectorAll('[data-frame]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.frame)===(state.frameRate||0))));root.querySelectorAll('[data-idle]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.idle)===(state.idleMode||0))));
   get('bn-loading-animation-description').textContent=state.loadingAnimationCustom?'自定义 GIF':'小鸽子';get('bn-loading-animation-reset').disabled=!state.loadingAnimationCustom;updateLoadingPreview();
-  iconize();
+  renderUpdate();iconize();
  }
  async function setPreference(key,value){const updated=await request('setting',{key,value});state={...state,[key]:value,...updated};render();}
  function panel(button,content){get(button).onclick=()=>{const open=get(content).hidden;get(content).hidden=!open;get(button).setAttribute('aria-expanded',String(open));updateLoadingPreview();};}
@@ -126,7 +128,40 @@ SOFTWARE.
  }
  get('bn-preferences').addEventListener('toggle',updateLoadingPreview);document.addEventListener('visibilitychange',updateLoadingPreview);
  if(reducedMotion.addEventListener)reducedMotion.addEventListener('change',updateLoadingPreview);else reducedMotion.addListener(updateLoadingPreview);
+ function renderUpdate(){
+  const value=state.appUpdate;if(!value)return;
+  const phase=value.phase,downloading=phase==='downloading'||phase==='cancelling',dialog=get('bn-update-dialog'),primary=get('bn-update-primary'),button=get('bn-app-update');
+  dialog.dataset.phase=phase;
+  get('bn-update-title').textContent=downloading?'正在下载更新':phase==='permission'?'允许安装更新':phase==='ready'?'准备安装':phase==='error'?'下载未完成':phase==='cancelled'?'下载已取消':'发现新版本';
+  get('bn-update-meta').textContent=[value.version,value.size].filter(Boolean).join(' · ');
+  get('bn-update-notes').textContent=value.notes||'';get('bn-update-notes').hidden=phase!=='available'||!value.notes;
+  get('bn-update-download').hidden=!downloading;
+  get('bn-update-progress').value=Math.max(0,Math.min(100,Number(value.percent)||0));get('bn-update-percent').textContent=(Number(value.percent)||0)+'%';
+  get('bn-update-progress-label').textContent=phase==='cancelling'?'正在取消…':'下载安装包';
+  get('bn-update-transferred').textContent=[value.downloaded,value.size].filter(Boolean).join(' / ');
+  get('bn-update-message').textContent=value.message||'';get('bn-update-message').hidden=!value.message||phase==='cancelling';
+  primary.hidden=downloading;primary.disabled=updateActionBusy;primary.textContent=phase==='permission'?'去设置':phase==='ready'?'安装更新':phase==='error'||phase==='cancelled'?'重新下载':'下载并安装';
+  get('bn-update-cancel').textContent=downloading?'取消下载':phase==='available'||phase==='permission'?'稍后':'关闭';
+  button.disabled=phase==='cancelling';button.dataset.state=downloading?'downloading':'available';get('bn-app-update-label').textContent=phase==='cancelling'?'取消中…':downloading?'正在下载…':phase==='ready'||phase==='permission'?'待安装':'有更新';
+ }
+ function openUpdate(){if(!get('bn-update-dialog').open){renderUpdate();get('bn-update-dialog').showModal();}}
+ function closeUpdate(){
+  const phase=state.appUpdate?.phase;
+  if(phase==='downloading'||(updateActionBusy&&updateOperation==='download'))request('appUpdateAction',{operation:'cancel'}).catch(error=>feedback(error.message,true));
+  get('bn-update-dialog').close();get('bn-app-update').focus({preventScroll:true});
+ }
+ get('bn-update-close').onclick=closeUpdate;get('bn-update-cancel').onclick=closeUpdate;
+ get('bn-update-dialog').addEventListener('cancel',event=>{event.preventDefault();closeUpdate();});
+ get('bn-update-dialog').addEventListener('click',event=>{if(event.target!==event.currentTarget)return;const rect=event.currentTarget.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)closeUpdate();});
+ get('bn-update-primary').onclick=async()=>{
+  if(updateActionBusy)return;
+  const phase=state.appUpdate?.phase,operation=phase==='permission'?'permission':phase==='ready'?'install':'download';
+  updateActionBusy=true;updateOperation=operation;renderUpdate();
+  try{await request('appUpdateAction',{operation});if(operation!=='download'){updateActionBusy=false;renderUpdate();}}
+  catch(error){updateActionBusy=false;get('bn-update-message').textContent=error.message;get('bn-update-message').hidden=false;get('bn-update-primary').disabled=false;}
+ };
  get('bn-app-update').onclick=async()=>{
+  if(state.appUpdate){openUpdate();return;}
   const button=get('bn-app-update'),label=get('bn-app-update-label'),status=get('bn-app-update-status');button.disabled=true;button.dataset.state='checking';label.textContent='正在检查…';status.hidden=true;
   try{const result=await request('checkUpdates');const available=(result.message||'').startsWith('发现新版本 ');button.dataset.state=available?'available':'current';label.textContent=available?'有更新':'已是最新';}
   catch(error){button.dataset.state='error';label.textContent='检查失败，重试';status.textContent=error.message;status.hidden=false;}
