@@ -1,16 +1,16 @@
 {
   "app": "io.github.bainiao.browser.trial",
-  "updatedAt": "2026-10-26T06:54:34.015169Z",
+  "updatedAt": "2026-10-26T09:40:03.254011Z",
   "releases": [
     {
-      "versionName": "0.1.10-trial",
-      "versionCode": 11,
-      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.10-trial/qianjisan-0.1.10-trial.apk",
-      "size": 3256361,
-      "sha256": "11f79486eb72b9a4de3bf36d32ac2f09db748a42428ffa2ee1bef491712e4399",
+      "versionName": "0.2.0",
+      "versionCode": 14,
+      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.0/qianjisan-0.2.0.apk",
+      "size": 3251013,
+      "sha256": "e0561024225b770fa5a75e283ff40bb605ca6904547f9690896f2f82d723efc5",
       "date": "2026-10-26",
       "channel": "trial",
-      "notes": "首页加入已确认的动态雨窗：水珠停留、聚集后滑落，跟随日夜配色；离开首页或开启减少动画时停止播放。\n\n酒馆操作改为柔和配色，连接状态增加灯点和边框提示。独立“检查连接”行已合并到标题右侧状态，点击状态即可刷新。\n\n修正开启后台保活时的网页进程优先级及隐藏页面回调调度。请重点试一下打开酒馆后切后台，以及生成过程中切后台这两种情况；手机实际运行仍以本次试用反馈为准。\n\n沿用原包名和签名，可直接覆盖安装，保留已有连接与偏好。APK更新与酒馆扩展更新分别维护。"
+      "notes": "0.2.0 公开版本，已有千机伞用户可直接覆盖安装，保留连接、登录和本机偏好。\n\n- 启动后自动检查 APK 更新；发现新版会在当前酒馆上方显示提醒，可稍后或查看说明，关闭后继续原页面。\n- 更新下载、进度与权限说明沿用页内样式，切后台回来不重复提醒；关闭下载窗口会取消下载。\n- 首页动态雨窗缓存静止雨珠，减少重复绘制；进入酒馆、切后台或移出视窗时停止动画。\n- 酒馆状态标题和上方留白调整，保留柔和按钮、连接状态灯与左右操作顺序。\n\nAPK 与酒馆前端扩展分别更新。原生 SillyTavern / Luker 网页及卡库沿用现有接口，服务端插件管理由服务器已有能力决定。"
     }
   ]
 }
