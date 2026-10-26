@@ -24,8 +24,6 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.ConsoleMessage;
@@ -181,12 +179,17 @@ public class MainActivity extends Activity {
     private ReplyNotifier replyNotifier;
     private String replyScript = EMPTY;
     private String hostLoaderScript = EMPTY;
+    private String hostThemeBarsScript = EMPTY;
+    private String wineThemeTint = EMPTY;
+    private String wineThemeText = EMPTY;
     private static final String LOADING_GIF_PATH = "/__qianjisan__/loading-animation.gif";
     private PowerManager.WakeLock netWakeLock;
     private ValueCallback<Uri[]> filePathCallback;
     private Handler handler;
     private SharedPreferences prefs;
     private WebView webView;
+    private FrameLayout contentRoot;
+    private FrameLayout homeContainer;
     /** 酒馆页面回首页时保留实例，显式关闭页面才销毁。 */
     private FrameLayout browserContainer;
     private boolean browserVisible;
@@ -219,6 +222,8 @@ public class MainActivity extends Activity {
     private boolean authRetried = false;
     private boolean authDialogShowing = false;
     private boolean webViewPaused = false;
+    private boolean webViewTimersPaused;
+    private boolean activityStopped;
     /** 当前是否处于 resumed 状态：决定渲染进程死亡时当场重建还是等回前台。 */
     private boolean activityResumed = false;
     /** 后台期间渲染进程被回收/崩溃，回到前台后需要重建 WebView。 */
@@ -291,12 +296,21 @@ public class MainActivity extends Activity {
         } catch (IOException error) {
             PerfLog.w(TAG, "host loader skin unavailable");
         }
+        try (InputStream in = getAssets().open("bainiao/host-theme-bars.js")) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+            this.hostThemeBarsScript = new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            PerfLog.w(TAG, "host theme bars unavailable");
+        }
         try {
             // 进程 fork 时刻：与 onPageFinished 相减得到真实冷启动耗时
             this.processStartMs = Process.getStartElapsedRealtime();
         } catch (Throwable ignored) {
         }
-        PerfLog.i(TAG, "onCreate sdk=" + Build.VERSION.SDK_INT
+        PerfLog.i(TAG, "onCreate sdk=" + Build.VERSION.SDK_INT + " device=" + Build.MANUFACTURER + "/" + Build.MODEL
                 + " server=" + TextKit.shortUrl(this.serverUrl));
         this.cacheManager = new CacheManager(this);
         this.cacheManager.setCredentialOrigin(this.serverUrl);
@@ -325,7 +339,7 @@ public class MainActivity extends Activity {
             public void checkUpdates(java.util.function.BiConsumer<String,String> completed) { MainActivity.this.checkUpdates(completed); }
             public void appUpdateAction(String operation) { MainActivity.this.appUpdateAction(operation); }
             public boolean appResumed() { return activityResumed&&!updateUiDestroyed&&!isFinishing()&&!isDestroyed(); }
-            public void updateSurfaceChanged(boolean showing) { updateSurfaceActive=showing;showFloatingOverlay(); }
+            public void updateSurfaceChanged(boolean showing) { updateSurfaceActive=showing;applySystemBars();showFloatingOverlay(); }
         }, this.appearance);
         if (this.serverUrl.isEmpty()) showHome();
         else enterBrowser();
@@ -339,6 +353,7 @@ public class MainActivity extends Activity {
             @Override public void onApplied(int mode) {
                 applyFrameRateLimit(effectiveFrameRate());
                 applyBackgroundExecutionPolicy();
+                applySystemBars();
             }
             @Override public void onUnlocked() {
                 setIdleMode(IDLE_OFF);
@@ -348,30 +363,32 @@ public class MainActivity extends Activity {
     }
 
     private void applySystemBars() {
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
-        int color = Color.parseColor(dark ? "#1d1e1a" : "#f7f6f1");
-        getWindow().setStatusBarColor(color);
-        getWindow().setNavigationBarColor(color);
-        getWindow().getDecorView().setSystemUiVisibility(dark ? 0
-                : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                | (Build.VERSION.SDK_INT >= 26 ? View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0));
-        if (Build.VERSION.SDK_INT >= 30) {
-            getWindow().setDecorFitsSystemWindows(true);
-            if (getWindow().getInsetsController() != null)
-                getWindow().getInsetsController().show(WindowInsets.Type.systemBars());
-        }
+        int localColor = SystemBars.localColor(dark);
+        boolean wine = this.webView != null && this.browserVisible && !this.updateSurfaceActive;
+        boolean full = wine && (isBurnInIdle() || this.customView != null);
+        boolean hideStatus = wine && (full || !this.prefs.getBoolean("show_status_bar", true));
+        int statusColor = wine ? SystemBars.themeColor(this.wineThemeTint, this.wineThemeText, localColor) : localColor;
+        SystemBars.apply(getWindow(), hideStatus, full, statusColor, localColor);
+        if (this.homeController != null) this.homeController.systemBarsChanged();
     }
 
     private void showHome() {
-        applySystemBars();
         this.browserVisible = false;
+        applySystemBars();
         if (this.appearance != null) this.appearance.hideOverlay();
         applyKeepScreenOn(false);
         resetWindowRefreshRate();
         WebView home = this.homeController.create();
-        setContentView(home);
+        if (this.homeContainer == null) this.homeContainer = new FrameLayout(this);
+        if (home.getParent() != this.homeContainer) {
+            if (home.getParent() instanceof ViewGroup) ((ViewGroup) home.getParent()).removeView(home);
+            this.homeContainer.addView(home, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        showContent(this.homeContainer);
+        if (this.webView != null) this.webView.setVisibility(View.INVISIBLE);
         applyBackgroundExecutionPolicy();
         this.homeController.visibilityChanged(true);
         this.homeController.stateChanged();
@@ -387,14 +404,9 @@ public class MainActivity extends Activity {
         this.homeController.visibilityChanged(false);
         if (this.webView != null && this.browserContainer != null) {
             this.browserVisible = true;
-            setContentView(this.browserContainer);
+            showContent(this.browserContainer);
             applySystemBars();
             this.webView.setVisibility(isBurnInIdle() ? View.INVISIBLE : View.VISIBLE);
-            if (this.webViewPaused) {
-                this.webViewPaused = false;
-                this.webView.onResume();
-                this.webView.resumeTimers();
-            }
             applyFrameRateLimit(effectiveFrameRate());
             applyIdleMode(idleMode());
             applyPageSettings();
@@ -405,9 +417,34 @@ public class MainActivity extends Activity {
         PerfLog.i("Browser", "entered");
     }
 
+    /** Both pages stay attached; only their containers stop drawing and accepting touches. */
+    private void showContent(View content) {
+        if (this.contentRoot == null) {
+            this.contentRoot = new FrameLayout(this);
+            setContentView(this.contentRoot);
+        }
+        if (content.getParent() != this.contentRoot) {
+            if (content.getParent() instanceof ViewGroup) ((ViewGroup) content.getParent()).removeView(content);
+            this.contentRoot.addView(content, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        for (int i = 0; i < this.contentRoot.getChildCount(); i++) {
+            View child = this.contentRoot.getChildAt(i);
+            child.setVisibility(child == content ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
+    private void removeBrowserContainer() {
+        FrameLayout container = this.browserContainer;
+        this.browserContainer = null;
+        if (container != null && container.getParent() instanceof ViewGroup)
+            ((ViewGroup) container.getParent()).removeView(container);
+    }
+
     private void applyPageSettings() {
         boolean keepalive = !this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
         applyBackgroundExecutionPolicy();
+        applySystemBars();
         this.handler.removeCallbacks(this.heartbeatRunnable);
         if (this.webView != null && keepalive) {
             this.handler.post(this.heartbeatRunnable);
@@ -438,6 +475,22 @@ public class MainActivity extends Activity {
         WebView current = this.webView;
         if (current == null) return;
         boolean keepalive = !this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
+        if (current instanceof KeepAliveWebView) ((KeepAliveWebView) current).setKeepAliveEnabled(keepalive);
+        boolean pausePage = !keepalive && (!this.activityResumed || !this.browserVisible);
+        boolean pauseTimers = !keepalive && this.activityStopped;
+        boolean pauseChanged = pausePage != this.webViewPaused || pauseTimers != this.webViewTimersPaused;
+        if (pausePage != this.webViewPaused) {
+            this.webViewPaused = pausePage;
+            if (pausePage) current.onPause(); else current.onResume();
+        }
+        // pauseTimers is process-wide: a foreground local home/update page must keep running.
+        if (pauseTimers != this.webViewTimersPaused) {
+            this.webViewTimersPaused = pauseTimers;
+            if (pauseTimers) current.pauseTimers(); else current.resumeTimers();
+        }
+        if (pauseChanged) PerfLog.i("RemoteWindow", "pause page=" + pausePage + " timers=" + pauseTimers
+                + " keepalive=" + keepalive + " resumed=" + this.activityResumed
+                + " browser=" + this.browserVisible + " attached=" + current.isAttachedToWindow());
         if (Build.VERSION.SDK_INT >= 26) {
             current.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, !keepalive);
         }
@@ -567,18 +620,24 @@ public class MainActivity extends Activity {
         long t0 = System.nanoTime();
         this.pendingWebViewRecovery = false;
         ensureIdleController();
-        WebView webView = new WebView(this);
+        removeBrowserContainer();
+        this.webViewPaused = false;
+        this.webViewTimersPaused = false;
+        this.wineThemeTint = EMPTY;
+        this.wineThemeText = EMPTY;
+        WebView webView = new KeepAliveWebView(this);
         this.webView = webView;
+        ((KeepAliveWebView) webView).setKeepAliveEnabled(!this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false));
         webView.setBackgroundColor(Color.parseColor("#18191c"));
         // 用 FrameLayout 承载 WebView：挂机黑屏遮罩要盖在它上面。
-        // 重建 WebView 时容器一并重建（旧容器随 Activity 内容替换被丢弃）。
+        // 旧容器由 close/recovery 显式移除，本地首页与远端容器共用持久 Activity 根。
         FrameLayout container = new FrameLayout(this);
         this.browserContainer = container;
         this.browserVisible = true;
         container.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         buildIdleOverlay(container);
-        setContentView(container);
+        showContent(container);
         applySystemBars();
 
         WebSettings settings = this.webView.getSettings();
@@ -688,7 +747,9 @@ public class MainActivity extends Activity {
         // 挂机黑屏属于内容视图级状态，重建 WebView 后要重新贴一遍
         applyIdleMode(idleMode());
         // 内核信息（包名 + 版本）写进报告，便于判断 WebView 是否过旧
-        PerfMonitor.setWebViewInfo(describeWebViewEngine());
+        String engine = describeWebViewEngine();
+        PerfMonitor.setWebViewInfo(engine);
+        PerfLog.i("RemoteWindow", "engine=" + engine);
 
         if (this.serverUrl.isEmpty()) {
             this.webView.loadUrl("about:blank");
@@ -790,6 +851,17 @@ public class MainActivity extends Activity {
             Log.w(TAG, "inject failed", e);
         }
         PerfMonitor.mark("injectScripts", System.nanoTime() - t0);
+    }
+
+    /** Install only after the new document commits; onPageStarted can still refer to old DOM. */
+    private void injectThemeBars(WebView target) {
+        if (target == null || target != this.webView || this.hostThemeBarsScript.isEmpty()) return;
+        String token = this.bridgeSession.tokenFor(target.getUrl(), this.serverUrl);
+        if (token.isEmpty()) return;
+        String origin = org.json.JSONObject.quote(UrlKit.originOf(this.serverUrl));
+        target.evaluateJavascript("(function(raw,token){if(window.top!==window||location.origin!==" + origin
+                + ")return;" + this.hostThemeBarsScript
+                + "(function(tint,text){raw.themeColor(token,tint,text);},token);})(window.TavernKeep,'" + token + "');", null);
     }
 
     private void clearHttpAuthentication() {
@@ -1240,6 +1312,9 @@ public class MainActivity extends Activity {
         public void onPageStarted(WebView webView, String str, Bitmap bitmap) {
             if (webView != MainActivity.this.webView) return;
             MainActivity.this.authRetried = false;
+            MainActivity.this.wineThemeTint = EMPTY;
+            MainActivity.this.wineThemeText = EMPTY;
+            MainActivity.this.applySystemBars();
             MainActivity.this.bridgeSession.beginDocument(str, MainActivity.this.serverUrl);
             if (MainActivity.this.replyNotifier != null) {
                 MainActivity.this.replyNotifier.resetDocument();
@@ -1281,7 +1356,10 @@ public class MainActivity extends Activity {
         /** 首次可见文档已提交时就装样式，不等远端子资源全部加载完。 */
         @Override
         public void onPageCommitVisible(WebView webView, String url) {
-            if (webView == MainActivity.this.webView) injectScripts(webView);
+            if (webView == MainActivity.this.webView) {
+                injectScripts(webView);
+                injectThemeBars(webView);
+            }
         }
 
         @Override
@@ -1349,6 +1427,7 @@ public class MainActivity extends Activity {
             }
             PerfMonitor.setPageCounts(MainActivity.this.pageStarts, MainActivity.this.pageFinishes);
             injectScripts(webView);
+            injectThemeBars(webView);
         }
 
         @Override
@@ -1435,14 +1514,21 @@ public class MainActivity extends Activity {
          */
         @Override
         public boolean onRenderProcessGone(WebView webView, RenderProcessGoneDetail detail) {
-            MainActivity.this.bridgeSession.clear();
+            boolean current = MainActivity.this.webView == webView;
+            if (current) MainActivity.this.bridgeSession.clear();
             boolean crashed = Build.VERSION.SDK_INT >= 26 && detail != null && detail.didCrash();
             Log.w(TAG, "render process gone, didCrash=" + crashed);
             PerfLog.w(TAG, "render process gone, didCrash=" + crashed
                     + ", foreground=" + MainActivity.this.activityResumed);
-            if (MainActivity.this.webView == webView) {
+            if (current) {
                 MainActivity.this.webView = null;
+                MainActivity.this.wineThemeTint = EMPTY;
+                MainActivity.this.wineThemeText = EMPTY;
+                if (MainActivity.this.webViewTimersPaused) webView.resumeTimers();
+                MainActivity.this.webViewPaused = false;
+                MainActivity.this.webViewTimersPaused = false;
             }
+            if (webView instanceof KeepAliveWebView) ((KeepAliveWebView) webView).setKeepAliveEnabled(false);
             try {
                 webView.setDownloadListener(null);
             } catch (Exception ignored) {
@@ -1455,10 +1541,12 @@ public class MainActivity extends Activity {
             if (parent != null) {
                 parent.removeView(webView);
             }
+            if (current) MainActivity.this.removeBrowserContainer();
             try {
                 webView.destroy();
             } catch (Exception ignored) {
             }
+            if (!current) return true;
             if (MainActivity.this.activityResumed && MainActivity.this.browserVisible) {
                 MainActivity.this.createWebView();
             } else {
@@ -2556,6 +2644,22 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void themeColor(final String token, final String tint, final String text) {
+            final MainActivity current = this.activity;
+            if (current == null || !current.isTrustedPage(token) || tint == null || text == null
+                    || (!tint.isEmpty() && SystemBars.parseColor(tint) == null)
+                    || (!text.isEmpty() && SystemBars.parseColor(text) == null)) return;
+            final WebView source = current.webView;
+            current.runOnUiThread(() -> {
+                if (source == null || source != current.webView || current.updateUiDestroyed
+                        || current.isDestroyed() || !current.isTrustedPage(token)) return;
+                current.wineThemeTint = tint;
+                current.wineThemeText = text;
+                current.applySystemBars();
+            });
+        }
     }
 
     /**
@@ -2690,22 +2794,7 @@ public class MainActivity extends Activity {
         this.customView = view;
         this.customViewCallback = callback;
         Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= 30) {
-            try {
-                WindowInsetsController controller = window.getInsetsController();
-                if (controller != null) {
-                    controller.hide(WindowInsets.Type.systemBars());
-                    controller.setSystemBarsBehavior(
-                            WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                }
-            } catch (Exception unused) {
-            }
-        } else {
-            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
-        }
+        applySystemBars();
         window.addContentView(view, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
@@ -2725,18 +2814,7 @@ public class MainActivity extends Activity {
         if (callback != null) {
             callback.onCustomViewHidden();
         }
-        Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= 30) {
-            try {
-                WindowInsetsController controller = window.getInsetsController();
-                if (controller != null) {
-                    controller.show(WindowInsets.Type.systemBars());
-                }
-            } catch (Exception unused) {
-            }
-        } else {
-            window.getDecorView().setSystemUiVisibility(0);
-        }
+        applySystemBars();
     }
 
     private void startKeepAliveService() {
@@ -2922,7 +3000,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        PerfLog.d(TAG, "onStart, pendingRecovery=" + this.pendingWebViewRecovery);
+        this.activityStopped = false;
+        PerfLog.i("RemoteWindow", "onStart pendingRecovery=" + this.pendingWebViewRecovery);
         // 后台期间渲染进程被系统回收/崩溃：旧实例已在 onRenderProcessGone 里销毁，
         // 这里回前台后重建 WebView 并重新加载服务器地址。
         if (this.pendingWebViewRecovery && this.browserVisible) {
@@ -2943,17 +3022,13 @@ public class MainActivity extends Activity {
         }
         // 回到前台：恢复绘制
         wv.setVisibility(this.browserVisible && !isBurnInIdle() ? View.VISIBLE : View.INVISIBLE);
-        if (this.webViewPaused) {
-            this.webViewPaused = false;
-            wv.onResume();
-            wv.resumeTimers();
-        }
+        applyBackgroundExecutionPolicy();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        PerfLog.d(TAG, "onPause");
+        PerfLog.i("RemoteWindow", "onPause");
         if (this.customView != null) {
             hideCustomView();
         }
@@ -2967,8 +3042,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        PerfLog.d(TAG, "onResume");
+        PerfLog.i("RemoteWindow", "onResume");
         this.activityResumed = true;
+        this.activityStopped = false;
         applySystemBars();
         if (this.homeController != null) {this.homeController.visibilityChanged(!this.browserVisible);this.homeController.stateChanged();}
         showStartupUpdateNotice();
@@ -2978,12 +3054,10 @@ public class MainActivity extends Activity {
         }
         WebView wv = this.webView;
         if (wv != null) {
-            wv.onResume();
-            wv.resumeTimers();
-            this.webViewPaused = false;
             // 挂机中回前台：WebView 保持不可见，只显示黑屏遮罩
             wv.setVisibility(this.browserVisible && isBurnInIdle() ? View.INVISIBLE
                     : this.browserVisible ? View.VISIBLE : View.INVISIBLE);
+            applyBackgroundExecutionPolicy();
             if (this.browserVisible) {
                 injectScripts(wv);
                 applyIdleMode(idleMode());
@@ -2997,19 +3071,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        boolean pauseBg = this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
-        applyBackgroundExecutionPolicy();
-        PerfLog.d(TAG, "onStop, pauseBg=" + pauseBg);
+        this.activityStopped = true;
         WebView wv = this.webView;
-        if (wv == null) {
-            return;
-        }
-        wv.setVisibility(View.INVISIBLE);
-        if (pauseBg) {
-            this.webViewPaused = true;
-            wv.onPause();
-            wv.pauseTimers();
-        }
+        if (wv != null) wv.setVisibility(View.INVISIBLE);
+        applyBackgroundExecutionPolicy();
+        PerfLog.i("RemoteWindow", "onStop pauseBg=" + this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false));
     }
 
     /** 系统内存压力分级回调：配合 jsHeap 一起看，能提前发现被 LMK 杀的征兆。 */
@@ -3036,8 +3102,10 @@ public class MainActivity extends Activity {
         WebView current = this.webView;
         this.webView = null;
         this.browserVisible = false;
-        this.browserContainer = null;
+        this.wineThemeTint = EMPTY;
+        this.wineThemeText = EMPTY;
         if (current != null) {
+            if (current instanceof KeepAliveWebView) ((KeepAliveWebView) current).setKeepAliveEnabled(false);
             current.resumeTimers();
             current.setDownloadListener(null);
             current.removeJavascriptInterface("TavernKeep");
@@ -3047,9 +3115,12 @@ public class MainActivity extends Activity {
             CookieManager.getInstance().flush();
             PerfLog.i("Browser", "closed; heartbeat/service/wakelock released; Cookie and HTTP cache retained");
         }
+        removeBrowserContainer();
         this.webViewPaused = false;
+        this.webViewTimersPaused = false;
         applyKeepScreenOn(false);
         applyFrameRateLimit(0);
+        applySystemBars();
     }
 
     @Override

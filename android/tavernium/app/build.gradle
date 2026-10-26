@@ -3,7 +3,7 @@ plugins {
 }
 
 // 版本号单一来源：defaultConfig 与 APK 文件名共用，避免两处不一致
-def tkVersionName = '0.2.0'
+def tkVersionName = '0.2.1'
 
 // 签名凭据不写进仓库：keystore.properties 与 *.jks 均在 .gitignore 中。
 // 缺失时 release 构建会直接失败，而不是悄悄退回 debug 签名。
@@ -22,7 +22,7 @@ android {
         applicationId 'io.github.bainiao.browser.trial'
         minSdk 24
         targetSdk 34
-        versionCode 14
+        versionCode 17
         versionName tkVersionName
         // 独立试用身份与上游 Tavernium 可同时安装。
         manifestPlaceholders = [appLabel: '千机伞']

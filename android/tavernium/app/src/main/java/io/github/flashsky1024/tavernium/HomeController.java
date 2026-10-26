@@ -105,6 +105,10 @@ final class HomeController {
         hostVisible=visible;
         if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.setVisible("+(visible&&!overlayOnly)+")",null);
     }
+    void systemBarsChanged(){
+        if(updateDialog!=null)SystemBars.applyLocal(updateDialog.getWindow(),
+                (activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES);
+    }
     void updateCheckChanged(String phase){appUpdateCheck=phase;stateChanged();}
     boolean updateOverlayOpen(){return overlayOnly&&!updatePresentation.isEmpty();}
     void showUpdate(boolean notice,boolean overBrowser){
@@ -139,6 +143,7 @@ final class HomeController {
                 if(external)host.appUpdateAction("dismiss");
             });
             dialog.show();
+            systemBarsChanged();
             dialog.getWindow().setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,android.view.ViewGroup.LayoutParams.MATCH_PARENT);
         });
     }
@@ -171,6 +176,7 @@ final class HomeController {
             value.put("replyNotifications",prefs.getBoolean("reply_notifications",false));
             value.put("keepalive",!prefs.getBoolean("pause_in_background",false));
             value.put("keepScreenOn",prefs.getBoolean("keep_screen_on",true));
+            value.put("showStatusBar",prefs.getBoolean("show_status_bar",true));
             value.put("ballEnabled",prefs.getBoolean("ball_enabled",false));
             value.put("ballSize",prefs.getInt("ball_size",48));value.put("ballOpacity",prefs.getInt("ball_opacity",90));
             value.put("ballShape",prefs.getString("ball_shape","circle"));value.put("ballPosition",prefs.getString("ball_position","right-bottom"));
@@ -317,6 +323,7 @@ final class HomeController {
             case "replyNotifications":edit.putBoolean("reply_notifications",data.getBoolean("value"));break;
             case "keepalive":edit.putBoolean("pause_in_background",!data.getBoolean("value"));break;
             case "keepScreenOn":edit.putBoolean("keep_screen_on",data.getBoolean("value"));break;
+            case "showStatusBar":edit.putBoolean("show_status_bar",data.getBoolean("value"));break;
             case "ballEnabled":{
                 boolean enabled=data.getBoolean("value");
                 if(enabled&&!appearance.overlayAllowed()){appearance.askOverlayPermission();throw new Exception("请允许千机伞显示在其他应用上层，返回后再次开启悬浮球。");}

@@ -311,10 +311,7 @@ final class IdleController {
             // 只有防烧屏模式才把 WebView 藏起来（停止合成）；普通挂机画面照常显示。
             wv.setVisibility(burnIn ? View.INVISIBLE : View.VISIBLE);
         }
-        // 防烧屏要求"整屏零发光"：底部手势导航条是系统渲染的，纯黑遮罩盖不到它，
-        // 一直亮着就等于一条常亮白线在烧屏。这里单独隐藏/还原导航栏。
-        // 普通挂机不隐藏：用户还得随时看画面、调设置，藏掉导航栏只会碍事。
-        SystemBars.setNavigationBarHidden(activity.getWindow(), burnIn);
+        // The Activity listener applies both system bars with the current page/update policy.
         if (listener != null) listener.onApplied(mode);
         PerfLog.i("IdleController", "idle mode: " + mode);
         PerfMonitor.count(mode == IDLE_OFF ? "mode.idle.off"
