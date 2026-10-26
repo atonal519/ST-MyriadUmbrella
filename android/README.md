@@ -2,9 +2,9 @@
 
 当前试用版：**0.1.7-trial**（versionCode 8）。
 
-[下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.7-trial/qianjisan-0.1.7-trial.apk) · [版本记录](https://github.com/atonal519/ST-MyriadUmbrella/releases)
+源码与构建文件已提供，APK 与线上更新清单正在准备发布。发布后可从 [Releases](https://github.com/atonal519/ST-MyriadUmbrella/releases) 下载安装包。
 
-Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。0.1.6 起可在首页右上角检查、下载更新，再按系统提示安装。
+Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。线上更新源发布后，0.1.6 起可在首页右上角检查、下载更新，再按系统提示安装。
 
 这是连接自有 SillyTavern / Luker 服务端的 WebView 浏览器。首页集中放置连接、服务端插件状态、卡库与设置。返回首页会保留当前酒馆页，点“返回酒馆”继续原页面；需要重新加载时，先点“关闭页面”再进入。
 
