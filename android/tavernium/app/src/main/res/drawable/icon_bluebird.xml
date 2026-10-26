@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/icon_bluebird_background" />
+    <item><scale android:drawable="@drawable/icon_bluebird_art" android:scaleWidth="30%"
+        android:scaleHeight="30%" android:scaleGravity="center" android:level="5000"
+        android:useIntrinsicSizeAsMinimum="false" /></item>
+</layer-list>

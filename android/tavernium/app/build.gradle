@@ -1,0 +1,99 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 版本号单一来源：defaultConfig 与 APK 文件名共用，避免两处不一致
+def tkVersionName = '0.1.7-trial'
+
+// 签名凭据不写进仓库：keystore.properties 与 *.jks 均在 .gitignore 中。
+// 缺失时 release 构建会直接失败，而不是悄悄退回 debug 签名。
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+android {
+    namespace 'io.github.flashsky1024.tavernium'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+
+    defaultConfig {
+        applicationId 'io.github.bainiao.browser.trial'
+        minSdk 24
+        targetSdk 34
+        versionCode 8
+        versionName tkVersionName
+        // 独立试用身份与上游 Tavernium 可同时安装。
+        manifestPlaceholders = [appLabel: '千机伞']
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            // 本轮交付 debug 签名的独立千机伞试用包。
+            manifestPlaceholders = [appLabel: '千机伞']
+        }
+        release {
+            // R8 代码压缩/混淆 + 资源压缩
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 正式签名：换 keystore 会导致已安装用户无法覆盖升级，密钥与密码必须异地备份
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        // lint 告警不阻断构建，报告输出到 app/build/reports/lint-results.html
+        abortOnError false
+    }
+
+    buildFeatures {
+        // 生成 BuildConfig.VERSION_NAME，供 User-Agent 等处引用，避免版本号写死在代码里
+        buildConfig true
+    }
+}
+
+// 缺少签名配置时让 release 明确失败，避免打出未签名或错签名的包
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { it.name.toLowerCase().contains('release') }
+    if (wantsRelease && !keystorePropsFile.exists()) {
+        throw new GradleException(
+                "缺少 keystore.properties：release 构建需要正式签名。\n" +
+                "请创建 tavernium/keystore.properties，内容形如：\n" +
+                "  storeFile=keystore/tavernium-release.jks\n" +
+                "  storePassword=***\n" +
+                "  keyAlias=tavernium\n" +
+                "  keyPassword=***")
+    }
+}
+
+// 本应用零第三方依赖：全部使用 Android 框架 API
+dependencies {
+}
+
+// 产物文件名带版本号，便于区分不同构建：qianjisan-<variant>-<version>.apk
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("qianjisan-${variant.name}-${tkVersionName}.apk")
+        }
+    }
+}

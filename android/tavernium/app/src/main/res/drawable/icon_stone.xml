@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/icon_stone_background" />
+    <!-- API 24 supports an initial scale level: 1 - (1 - .5) * .30 = .85. -->
+    <item><scale android:drawable="@drawable/icon_stone_art" android:scaleWidth="30%"
+        android:scaleHeight="30%" android:scaleGravity="center" android:level="5000"
+        android:useIntrinsicSizeAsMinimum="false" /></item>
+</layer-list>

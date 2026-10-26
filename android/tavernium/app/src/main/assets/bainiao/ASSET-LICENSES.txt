@@ -1,0 +1,47 @@
+Default loading animation: Dove — Google Animated Noto Emoji.
+License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+https://creativecommons.org/licenses/by/4.0/
+Official documentation: https://googlefonts.github.io/noto-emoji-files/?view=docs
+Editable source: https://fonts.gstatic.com/s/e/notoemoji/latest/1f54a/lottie.json
+
+Modifications for 千机伞: removed only the leaf front and leaf layers (the olive
+branch), retained the remaining bird and flight keyframes, rendered at 192px,
+sampled every second original frame (95 GIF frames, approximately 30fps),
+and exported a transparent looping GIF of 3.17 seconds.
+
+No runtime Lottie library is bundled in this application.
+The upstream Tavernium application license remains in LICENSE.txt.
+
+Static bird preset: the user-approved flat white dove on a black background.
+Reference: Microsoft Fluent Emoji — Dove.
+https://github.com/microsoft/fluentui-emoji/tree/main/assets/Dove
+Modifications for 千机伞: AI-assisted flat redraw, removed the olive branch and
+three-dimensional shading. The PNG is used unchanged for the local preview and
+LauncherStone. The default umbrella presets remain separate Lucide assets.
+
+Additional launcher presets supplied by the user:
+- icon-bluebird.jpg / icon_bluebird_art.jpg (蓝翼)
+- icon-redbird.jpg / icon_redbird_art.jpg (剪纸)
+The supplied JPEG files are used unchanged. Android drawable resources provide
+the launcher safe area and background; the illustrations are not redrawn.
+
+Microsoft Fluent Emoji reference license: MIT.
+Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

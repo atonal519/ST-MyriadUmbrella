@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/icon_bluebird_background" />
+    <foreground>
+        <!-- Match the approved dove's 85% visible face; the supplied artwork stays unchanged. -->
+        <inset android:drawable="@drawable/icon_bluebird_art" android:inset="21.666667%" />
+    </foreground>
+</adaptive-icon>

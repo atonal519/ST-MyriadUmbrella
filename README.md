@@ -1,5 +1,7 @@
 # 千机伞 · Myriad Umbrella
 
+Android 试用版 **0.1.7-trial**：[下载 APK](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.7-trial/qianjisan-0.1.7-trial.apk) · [App 源码与构建说明](android/README.md)。0.1.6 起可在 App 首页右上角检查更新，直接覆盖安装。APK 与下方酒馆扩展分别更新。
+
 当前前端插件版本：**0.1.1**。适用于原生 SillyTavern 与 Luker，无后端插件或额外依赖。
 
 在酒馆的“扩展 → 安装扩展”中填入仓库地址，安装后刷新页面：
