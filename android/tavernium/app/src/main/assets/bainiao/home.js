@@ -4,6 +4,7 @@
  const pending=new Map();let nextId=0,state={},cards=[],cardsSourceKey='',cardsLoaded=false,currentView='home',editDirty=false,currentDetail=null,coverObserver=null;
  const names={ink:'墨伞',stone:'白鳥',moss:'青伞',bluebird:'蓝翼',redbird:'剪纸'};
  let updateActionBusy=false,updateOperation='';
+ let statusRequest=null;
  const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
  const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
  systemTheme.addEventListener('change',()=>{if(typeof state.dark!=='boolean')bainiaoRainGlass.render(systemTheme.matches);});
@@ -84,18 +85,24 @@ SOFTWARE.
  function closeEdit(){get('bn-connection-dialog').close();editDirty=false;}
  function fillEdit(){get('bn-edit-url').value=state.url||'';get('bn-username').value=state.username||'';get('bn-password').value=state.password||'';}
  function openEdit(){editDirty=false;fillEdit();get('bn-connection-error').hidden=true;get('bn-connection-dialog').showModal();}
- function resetStatus(){get('bn-connection-status').textContent=state.url?'待检查':'未设置';get('bn-connection-status').dataset.state='pending';get('bn-plugin-list').replaceChildren();get('bn-plugin-list').append(Object.assign(document.createElement('p'),{className:'bn-inline-note',textContent:state.url?'检查连接以读取插件状态。':'添加连接后检查插件状态。'}));get('bn-plugin-message').hidden=true;}
+ function setConnectionStatus(kind,text){
+  const status=get('bn-connection-status'),refresh=get('bn-status-refresh');status.textContent=text;status.dataset.state=kind;
+  root.querySelector('.bn-connection').dataset.state=kind;refresh.disabled=kind==='checking';refresh.setAttribute('aria-busy',String(kind==='checking'));
+  refresh.setAttribute('aria-label',text+'，'+(state.url?'刷新酒馆和插件状态':'添加酒馆地址'));refresh.title=state.url?'点击刷新酒馆和插件状态':'添加酒馆地址';
+ }
+ function resetStatus(){statusRequest=null;setConnectionStatus('idle',state.url?'待检查':'未设置');get('bn-plugin-list').replaceChildren();get('bn-plugin-list').append(Object.assign(document.createElement('p'),{className:'bn-inline-note',textContent:state.url?'点击上方状态可刷新插件信息。':'添加连接后自动读取插件状态。'}));get('bn-plugin-message').hidden=true;}
  function showView(view){
   if(currentView==='library'&&view!=='library'){closeDetail();clearCoverObserver();get('bn-detail-content').replaceChildren();}
-  currentView=view;root.dataset.view=view;get('bn-home').hidden=view!=='home';get('bn-system-page').hidden=view!=='system';get('bn-library-page').hidden=view!=='library';feedback('');updateLoadingPreview();window.scrollTo(0,0);
+  currentView=view;root.dataset.view=view;get('bn-home').hidden=view!=='home';get('bn-system-page').hidden=view!=='system';get('bn-library-page').hidden=view!=='library';bainiaoRainGlass.sync();feedback('');updateLoadingPreview();window.scrollTo(0,0);
  }
  window.BainiaoApp={ready:false,resolve(id,result){const task=pending.get(id);if(!task)return;pending.delete(id);result.ok?task.resolve(result.value):task.reject(new Error(result.error||'操作未完成，请重试。'));},back(){
   if(get('bn-update-dialog').open){closeUpdate();return true;}
   if(get('bn-connection-dialog').open){closeEdit();return true;}
   if(!get('bn-card-detail').hidden){closeDetail();return true;}
   if(currentView!=='home'){showView('home');return true;}return false;
- },updateChanged(value){state.appUpdate=value;updateActionBusy=false;renderUpdate();if(['available','permission','ready','error'].includes(value.phase))openUpdate();},stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}state={...state,...value};render();},setVisible(visible){root.dataset.hostVisible=visible?'true':'false';updateLoadingPreview();}};
+ },updateChanged(value){state.appUpdate=value;updateActionBusy=false;renderUpdate();if(['available','permission','ready','error'].includes(value.phase))openUpdate();},stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}state={...state,...value};render();},setVisible(visible){root.dataset.hostVisible=visible?'true':'false';updateLoadingPreview();bainiaoRainGlass.sync();}};
  function render(){
+
   get('bn-url').value=state.url||'';if(get('bn-connection-dialog').open&&!editDirty)fillEdit();
   if(typeof state.dark==='boolean'){root.dataset.theme=state.dark?'dark':'light';document.documentElement.style.colorScheme=state.dark?'dark':'light';document.documentElement.style.backgroundColor=state.dark?'#1d1e1a':'#f7f6f1';}
   bainiaoRainGlass.render(typeof state.dark==='boolean'?state.dark:systemTheme.matches);
@@ -174,7 +181,7 @@ SOFTWARE.
  get('bn-connection-form').onsubmit=act(async event=>{
   event.preventDefault();const url=get('bn-edit-url').value.trim();
   try{const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol)||!parsed.hostname||parsed.username||parsed.password)throw Error();}catch{throw new Error('请填写完整的 http:// 或 https:// 酒馆地址。');}
-  const saved=await request('saveConnection',{url,username:get('bn-username').value,password:get('bn-password').value});state={...state,...saved};cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();editDirty=false;render();closeEdit();resetStatus();feedback('连接已保存');
+  const saved=await request('saveConnection',{url,username:get('bn-username').value,password:get('bn-password').value});state={...state,...saved};cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();editDirty=false;render();closeEdit();resetStatus();feedback('连接已保存');act(refreshStatus)();
  });
  async function connectionAction(operation){const value=await request('connectionAction',{operation});state={...state,...value};if(operation==='logout'||operation==='delete'){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}editDirty=false;render();fillEdit();get('bn-connection-error').hidden=true;resetStatus();if(operation==='delete'){closeEdit();feedback('本机链接已删除');}else if(operation==='logout')feedback('已退出酒馆登录');else feedback('网页缓存已清空');}
  get('bn-logout').onclick=act(()=>connectionAction('logout'));get('bn-delete-connection').onclick=act(()=>connectionAction('delete'));get('bn-clear-cache').onclick=act(async()=>{await request('connectionAction',{operation:'cache'});get('bn-connection-error').textContent='网页缓存已清空，登录保留。';get('bn-connection-error').hidden=false;});
@@ -196,8 +203,11 @@ SOFTWARE.
   if(value.pluginsError){get('bn-plugin-message').textContent=value.pluginsError;get('bn-plugin-message').hidden=false;}else get('bn-plugin-message').hidden=true;
  }
  async function refreshStatus(){
-  if(!state.url){openEdit();return;}get('bn-connection-status').textContent='正在检查';get('bn-connection-status').dataset.state='pending';
-  try{const value=await request('status');get('bn-connection-status').textContent='已连接';get('bn-connection-status').dataset.state='ok';renderPlugins(value);feedback('');}catch(error){get('bn-connection-status').textContent='需要处理';get('bn-connection-status').dataset.state='pending';get('bn-plugin-list').replaceChildren();throw error;}
+  if(!state.url){openEdit();return;}if(statusRequest)return;
+  const current={};statusRequest=current;setConnectionStatus('checking','检查中');
+  try{const value=await request('status');if(statusRequest!==current)return;setConnectionStatus('ok','已连接');renderPlugins(value);feedback('');}
+  catch(error){if(statusRequest!==current)return;setConnectionStatus('error',error.message.includes('登录')?'待登录':'未连接');get('bn-plugin-list').replaceChildren();throw error;}
+  finally{if(statusRequest===current)statusRequest=null;}
  }
  get('bn-status-refresh').onclick=act(refreshStatus);
  for(const [id,key]of [['bn-keepalive','keepalive'],['bn-screen-on','keepScreenOn'],['bn-reply-notifications','replyNotifications'],['bn-ball-enabled','ballEnabled'],['bn-perf-monitor','perfMonitor'],['bn-verbose-log','verboseLog']])get(id).onchange=act(async()=>{try{await setPreference(key,get(id).checked);}catch(error){render();throw error;}});

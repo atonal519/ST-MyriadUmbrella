@@ -145,12 +145,14 @@ public class MainActivity extends Activity {
 
     /**
      * 帧率上限的 JS 侧实现：包装 requestAnimationFrame，按 window.__tkMinFrameInterval
-     * （毫秒）限制最小帧间隔。值为 0 时原样透传，几乎零开销。
+     * （毫秒）限制最小帧间隔。前台值为 0 时仍使用原生绘制回调。
+     * 开启保活且页面不可见时，以一个按需的 1Hz 定时器交付待执行回调，
+     * 避免初始化/生成等待已暂停的原生 rAF；没有待办时不运行定时器。
      * 之所以在页面里做节流而不是只调系统刷新率：系统级 API 只是"首选刷新率"提示，
      * 真正吃掉 CPU 的是每帧的 JS 回调 + 布局 + 绘制，必须在源头减少帧数。
      * 用单引号书写，避免 Java 字符串转义（该常量会被验证脚本原样提取给 node 测试）。
      */
-    private static final String FRAME_RATE_HOOK_JS = "(function(){try{if(window.__tkRafHooked)return;window.__tkRafHooked=1;var O=window.requestAnimationFrame;var C=window.cancelAnimationFrame;var T={};var N=1;var L=0;function now(){return (window.performance&&performance.now)?performance.now():Date.now();}window.requestAnimationFrame=function(cb){var iv=window.__tkMinFrameInterval||0;if(iv<=0){return O.call(window,cb);}var id=N++;var d=Math.max(0,iv-(now()-L));T[id]=setTimeout(function(){delete T[id];L=now();cb(L);},d);return id;};window.cancelAnimationFrame=function(id){if(T[id]!==undefined){clearTimeout(T[id]);delete T[id];return;}if(C){C.call(window,id);}};}catch(e){}})();";
+    private static final String FRAME_RATE_HOOK_JS = "(function(){try{if(window.__tkRafHooked)return;window.__tkRafHooked=1;var O=window.requestAnimationFrame;var C=window.cancelAnimationFrame;var T={};var N=1073741824;var L=0;var B=false;var S=0;function now(){return (window.performance&&window.performance.now)?window.performance.now():Date.now();}function clear(r){if(r.r!==null&&C)C.call(window,r.r);if(r.t!==null)clearTimeout(r.t);r.r=r.t=null;}function deliver(id,t){var r=T[id];if(!r)return;delete T[id];L=t;r.cb.call(window,t);}function arm(){if(S||!Object.keys(T).length)return;var iv=Math.max(1000,window.__tkMinFrameInterval||0);S=setTimeout(function(){S=0;var ids=Object.keys(T);var t=now();L=t;for(var i=0;i<ids.length;i++){try{deliver(ids[i],t);}catch(e){setTimeout((function(error){return function(){throw error;};})(e),0);}}arm();},Math.max(0,iv-(now()-L)));}function schedule(id){var r=T[id];if(!r)return;if(B){arm();return;}var iv=window.__tkMinFrameInterval||0;if(iv>0){r.t=setTimeout(function(){deliver(id,now());},Math.max(0,iv-(now()-L)));}else{r.r=O.call(window,function(t){deliver(id,t);});}}window.requestAnimationFrame=function(cb){if(typeof cb!=='function')throw new TypeError('Frame callback must be a function');var id=N++;T[id]={cb:cb,r:null,t:null};schedule(id);return id;};window.cancelAnimationFrame=function(id){var r=T[id];if(!r){if(C)C.call(window,id);return;}clear(r);delete T[id];if(S&&!Object.keys(T).length){clearTimeout(S);S=0;}};window.__tkSetBackgroundFrames=function(enabled){enabled=!!enabled;if(B===enabled)return;B=enabled;if(S){clearTimeout(S);S=0;}var ids=Object.keys(T);for(var i=0;i<ids.length;i++)clear(T[ids[i]]);for(var j=0;j<ids.length;j++)schedule(ids[j]);};}catch(e){}})();";
 
     /** 页面完成后安装 rAF hook；后续帧率设置复用同一变量。 */
     /** rAF hook 是否确实装进了当前页面（供报告展示，防止"设了没生效"却无感知）。 */
@@ -327,6 +329,7 @@ public class MainActivity extends Activity {
         this.idleController = new IdleController(this, this.handler, new IdleController.Listener() {
             @Override public void onApplied(int mode) {
                 applyFrameRateLimit(effectiveFrameRate());
+                applyBackgroundExecutionPolicy();
             }
             @Override public void onUnlocked() {
                 setIdleMode(IDLE_OFF);
@@ -360,6 +363,7 @@ public class MainActivity extends Activity {
         resetWindowRefreshRate();
         WebView home = this.homeController.create();
         setContentView(home);
+        applyBackgroundExecutionPolicy();
         this.homeController.visibilityChanged(true);
         this.homeController.stateChanged();
         PerfLog.i("Home", "local home entered; remote browser retained=" + (this.webView != null));
@@ -394,6 +398,7 @@ public class MainActivity extends Activity {
 
     private void applyPageSettings() {
         boolean keepalive = !this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
+        applyBackgroundExecutionPolicy();
         this.handler.removeCallbacks(this.heartbeatRunnable);
         if (this.webView != null && keepalive) {
             this.handler.post(this.heartbeatRunnable);
@@ -411,6 +416,25 @@ public class MainActivity extends Activity {
                 () -> { if (this.webView != null) this.webView.reload(); });
         PerfLog.i("PageSettings", "consumed browser=" + (this.webView != null && this.browserVisible)
                 + " keepalive=" + keepalive + " ball=" + this.prefs.getBoolean("ball_enabled", false));
+    }
+
+    /** 保活服务、网页进程优先级和隐藏页面调度使用同一偏好，独立于悬浮球。 */
+    private void applyBackgroundExecutionPolicy() {
+        WebView current = this.webView;
+        if (current == null) return;
+        boolean keepalive = !this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
+        if (Build.VERSION.SDK_INT >= 26) {
+            current.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, !keepalive);
+        }
+        if (sameServerOrigin(current.getUrl())) {
+            current.evaluateJavascript(FRAME_RATE_HOOK_JS + backgroundFrameStateJs(), null);
+        }
+    }
+
+    private String backgroundFrameStateJs() {
+        boolean background = !this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false)
+                && (!this.activityResumed || !this.browserVisible || isBurnInIdle());
+        return "window.__tkSetBackgroundFrames(" + background + ");";
     }
 
     private void applyLocalSetting(String key) {
@@ -634,13 +658,6 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
-        if (Build.VERSION.SDK_INT >= 26) {
-            try {
-                WebView.class.getMethod("setRendererPriorityPolicy", Integer.TYPE, Boolean.TYPE)
-                        .invoke(this.webView, 2, true);
-            } catch (Exception unused) {
-            }
-        }
         this.webView.setDownloadListener(new DownloadListener() {
             @Override
             public void onDownloadStart(String url, String userAgent2, String contentDisposition,
@@ -742,11 +759,12 @@ public class MainActivity extends Activity {
             if (this.prefs.getBoolean(PREF_REPLY_NOTIFICATIONS, false)) {
                 js.append(this.replyScript);
             }
-            // 始终装 hook（幂等）：变量为 0 时原样透传。这样改帧率只需改变量，
+            // 始终装 hook（幂等）：前台变量为 0 时使用原生 rAF。这样改帧率只需改变量，
             // 对页面已缓存的 rAF 引用同样生效。
             js.append(FRAME_RATE_HOOK_JS)
                     .append("window.__tkMinFrameInterval=")
-                    .append(frameIntervalMs(effectiveFrameRate())).append(';');
+                    .append(frameIntervalMs(effectiveFrameRate())).append(';')
+                    .append(backgroundFrameStateJs());
             // 性能监控开启时把 JS 探针种子拼进同一次 IPC，不额外增加跨进程调用
             if (this.prefs.getBoolean(PREF_PERF_MONITOR, false)) {
                 js.append(PERF_PROBE_SEED);
@@ -2888,9 +2906,9 @@ public class MainActivity extends Activity {
         if (this.customView != null) {
             hideCustomView();
         }
-        // 旧代码在这里还 injectScripts 一次，但 onResume 本来就会注入——纯属一次多余的
-        // 跨进程 evaluateJavascript IPC。心跳 runnable 也已在别处覆盖，这里不再补注入。
+        // 此处仅同步执行策略，不重复注入下载、加载动画等完整页面脚本。
         this.activityResumed = false;
+        applyBackgroundExecutionPolicy();
         if (this.idleController != null) this.idleController.pause();
     }
 
@@ -2920,13 +2938,13 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 退到后台时让 WebView 不可见：渲染进程不再为没人看的画面持续合成帧，
-     * 这是后台空转最直接的一处 CPU 来源。JS 定时器不受影响，后台生成继续。
+     * 退到后台时不再绘制；保活的执行优先级和按需帧回调另由统一策略维护。
      */
     @Override
     protected void onStop() {
         super.onStop();
         boolean pauseBg = this.prefs.getBoolean(PREF_PAUSE_IN_BACKGROUND, false);
+        applyBackgroundExecutionPolicy();
         PerfLog.d(TAG, "onStop, pauseBg=" + pauseBg);
         WebView wv = this.webView;
         if (wv == null) {

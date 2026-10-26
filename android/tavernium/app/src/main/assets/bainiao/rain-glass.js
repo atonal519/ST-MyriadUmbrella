@@ -1,114 +1,230 @@
-/* Static rain glass, directly transferred from the user-approved preview.
-   Only real size or system-theme changes repaint an existing home view. */
+/* User-approved rain-window material. Local image only; hidden/offscreen pages
+   keep their last frame, with no animation loop or repeated image requests. */
 const bainiaoRainGlass = (() => {
   'use strict';
-  const banner = document.getElementById('bn-rain-glass');
-  const state = { seed: 71023, density: 1.9, fog: .62, refraction: 1 };
-  let dark = null, lastRender = '';
-  const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-  function random(seed) { return () => { seed |= 0; seed = seed + 0x6d2b79f5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-  function canvas(width, height) { const image = document.createElement('canvas'); image.width = width; image.height = height; return image; }
-  function outside(width, height, dark) {
-    const image = canvas(width, height), c = image.getContext('2d'), s = width / 390;
-    const rnd = random(state.seed ^ 8172);
-    const wash = c.createLinearGradient(0, 0, width * .2, height);
-    wash.addColorStop(0, dark ? '#647476' : '#d6e0de'); wash.addColorStop(.52, dark ? '#354443' : '#b0bcb7'); wash.addColorStop(1, dark ? '#1b2e30' : '#889c93');
-    c.fillStyle = wash; c.fillRect(0, 0, width, height);
-    c.filter = 'blur(' + 12 * s + 'px)';
-    for (let i = 0; i < 20; i++) {
-      const x = rnd() * width, y = rnd() * height, r = (14 + rnd() * 38) * s;
-      c.globalAlpha = .13 + rnd() * .2; c.fillStyle = dark ? ['#182e31', '#697266', '#7f8771'][i % 3] : ['#4d6865', '#dae0d9', '#8ca29d'][i % 3];
-      c.beginPath(); c.ellipse(x, y, r * .7, r * 1.5, -.3, 0, Math.PI * 2); c.fill();
-    }
-    c.globalAlpha = .32; c.filter = 'blur(' + 3 * s + 'px)';
-    c.fillStyle = dark ? '#14252a' : '#526e68';
-    for (const [x, w] of [[.12, .023], [.36, .06], [.61, .035], [.91, .02]]) c.fillRect(width * x, height * .25, width * w, height);
-    c.globalAlpha = 1; c.filter = 'blur(' + 5 * s + 'px)';
-    for (const [x, y, r] of [[.18, .63, 8], [.68, .34, 12], [.83, .74, 6]]) {
-      const light = c.createRadialGradient(width * x, height * y, 0, width * x, height * y, r * s * 3.2);
-      light.addColorStop(0, dark ? 'rgba(223,193,143,.7)' : 'rgba(242,231,195,.65)'); light.addColorStop(.28, dark ? 'rgba(190,166,122,.36)' : 'rgba(226,222,189,.34)'); light.addColorStop(1, 'rgba(200,185,150,0)');
-      c.fillStyle = light; c.fillRect(0, 0, width, height);
-    }
-    c.filter = 'none'; return image;
+  const canvas = document.getElementById('bn-rain-glass');
+  const root = document.getElementById('bn-home-preview');
+  const image = new Image();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  let ctx, source, backdrop, droplets = [], trails = [];
+  let lastPaint = 0, frame = 0, running = false, dark = null, inView = true;
+  let seed = 48103, time = 0, merges = 0, pixelScale = 1;
+  const FRAME_INTERVAL = 1000 / 30;
+  const random = () => {
+    seed |= 0; seed = seed + 0x6d2b79f5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const scale = () => pixelScale;
+  const active = () => !document.hidden && root.dataset.hostVisible !== 'false'
+    && (root.dataset.view || 'home') === 'home'
+    && !document.getElementById('bn-home').hidden && inView;
+  function fallback() {
+    if (!ctx) return;
+    const wash = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    wash.addColorStop(0, dark ? '#30413f' : '#c1d0ca');
+    wash.addColorStop(1, dark ? '#162625' : '#7e9990');
+    ctx.fillStyle = wash; ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-  function material(width, height, dark) {
-    const s = width / 390, rnd = random(state.seed), scene = outside(width, height, dark);
-    const fogged = canvas(width, height), fogContext = fogged.getContext('2d');
-    fogContext.filter = 'blur(' + (3 + state.fog * 9) * s + 'px)'; fogContext.drawImage(scene, -10 * s, -4 * s, width + 20 * s, height + 8 * s); fogContext.filter = 'none';
-    fogContext.fillStyle = dark ? 'rgba(80,96,97,.12)' : 'rgba(223,228,216,.20)'; fogContext.fillRect(0, 0, width, height);
-    const source = scene.getContext('2d').getImageData(0, 0, width, height).data;
-    const output = fogContext.getImageData(0, 0, width, height), pixels = output.data;
-    const sample = (x, y, channel) => {
-      x = clamp(x, 0, width - 1.001); y = clamp(y, 0, height - 1.001);
-      const ix = x | 0, iy = y | 0, fx = x - ix, fy = y - iy, a = (iy * width + ix) * 4 + channel;
-      return source[a] * (1 - fx) * (1 - fy) + source[a + 4] * fx * (1 - fy) + source[a + width * 4] * (1 - fx) * fy + source[a + width * 4 + 4] * fx * fy;
-    };
-    for (let i = 0; i < pixels.length; i += 4) {
-      const grain = (rnd() - .5) * 2.1; pixels[i] += grain; pixels[i + 1] += grain; pixels[i + 2] += grain;
+  function drop(x, y, r, speed = 0, hold = 0) {
+    return { x, y, r, speed, hold, velocity: 0, lean: (random() - .5) * .22,
+      round: .86 + random() * .17, phase: random() * Math.PI * 2, dead: false };
+  }
+  function reset(newSeed = 48103) {
+    seed = newSeed; time = 0; merges = 0; droplets = []; trails = [];
+    const s = scale(), w = canvas.width, h = canvas.height;
+    // Most condensation is quiet, with a range of round/flattened beads.
+    const count = Math.min(160, Math.round(w * h / (900 * s * s)));
+    for (let i = 0; i < count; i++) droplets.push(drop(random() * w, random() * h, (.55 + random() * 1.65) * s));
+    for (let i = 0; i < Math.min(9, Math.round(w / (54 * s))); i++) {
+      const d = drop((.08 + random() * .84) * w, random() * h, (2.3 + random() * 2.3) * s,
+        (13 + random() * 20) * s, random() * 4);
+      droplets.push(d);
     }
-    const drops = [];
-    const appendDrop = (x, y, r, fall = false) => drops.push({ x, y, rx: r * (.74 + rnd() * .27), ry: r * (fall ? 1.35 + rnd() * .45 : .84 + rnd() * .4), phase: rnd() * 6.28, strength: .84 + rnd() * .22 });
-    // Narrow wet ribbons refract the same outside image and finish in a heavier bead.
-    for (let n = 0; n < Math.round(6 * state.density * width / 780); n++) {
-      const x = (.08 + rnd() * .84) * width, end = (.28 + rnd() * .78) * height, start = -rnd() * height * .15;
-      const phase = rnd() * 6.28, radius = (.48 + rnd() * .78) * s;
-      const center = y => x + Math.sin(y / (23 * s) + phase) * .85 * s + Math.sin(y / (7 * s) + phase) * .22 * s;
-      for (let y = Math.max(0, start | 0); y < Math.min(height, end); y++) {
-        const cx = center(y), rw = radius * (.65 + .25 * Math.sin(y / (11 * s) + phase));
-        for (let px = Math.max(0, Math.floor(cx - rw - 1)); px <= Math.min(width - 1, Math.ceil(cx + rw + 1)); px++) {
-          const u = (px - cx) / rw, distance = Math.abs(u); if (distance > 1) continue;
-          const opacity = .45 * clamp((1 - distance) * rw), index = (y * width + px) * 4;
-          for (let k = 0; k < 3; k++) pixels[index + k] = pixels[index + k] * (1 - opacity) + (sample(px - u * 7 * s * state.refraction, y + 2 * s, k) + (u < 0 ? -10 : 13) * distance * distance) * opacity;
+    // One representative collection/slide sequence is visible in the short clip.
+    const x = w * .37;
+    droplets.push(drop(x, h * .13, 3.1 * s, 23 * s, .3));
+    droplets.push(drop(x + s, h * .38, 3.8 * s, 0, 99));
+    droplets.push(drop(w * .74, h * .29, 3.4 * s, 20 * s, 1.1));
+  }
+
+  function buildBackground() {
+    if (!ctx || !image.naturalWidth) return;
+    const w = canvas.width, h = canvas.height, ratio = w / h;
+    let sw = image.naturalWidth, sh = image.naturalHeight;
+    if (sw / sh > ratio) sw = sh * ratio; else sh = sw / ratio;
+    source = document.createElement('canvas'); source.width = w; source.height = h;
+    source.getContext('2d').drawImage(image, (image.naturalWidth - sw) / 2,
+      (image.naturalHeight - sh) / 2, sw, sh, 0, 0, w, h);
+    backdrop = document.createElement('canvas'); backdrop.width = w; backdrop.height = h;
+    const bc = backdrop.getContext('2d'), blur = Math.max(2.5, w / 150);
+    bc.filter = `blur(${blur}px)`;
+    bc.drawImage(source, -blur * 2, -blur * 2, w + blur * 4, h + blur * 4);
+  }
+  function resize() {
+    const cssWidth = canvas.clientWidth, cssHeight = canvas.clientHeight;
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+    const dpr = Math.min(devicePixelRatio || 1, 1.5, 780 / cssWidth);
+    const w = Math.max(1, Math.round(cssWidth * dpr));
+    const h = Math.max(1, Math.round(cssHeight * dpr));
+    if (ctx && canvas.width === w && canvas.height === h) return;
+    canvas.width = w; canvas.height = h; pixelScale = w / cssWidth;
+    ctx = canvas.getContext('2d');
+    buildBackground(); reset(); paint(); sync();
+  }
+  function advance(dt) {
+    time += dt;
+    const s = scale(), h = canvas.height;
+    for (const d of droplets) {
+      if (d.dead || !d.speed || time < d.hold) continue;
+      const target = d.speed * (1 + (d.r / s - 3) * .14);
+      d.velocity += (target - d.velocity) * Math.min(1, dt * 2.8);
+      const beforeX = d.x, beforeY = d.y;
+      d.y += d.velocity * dt;
+      d.x += Math.sin(d.y / (24 * s) + d.phase) * d.velocity * dt * .025;
+      if (d.velocity > 3 * s) {
+        let trail = d.trail;
+        if (!trail) {
+          trail = { r: d.r * .47, points: [[beforeX, beforeY]], age: 0 };
+          trails.push(trail); d.trail = trail;
+        }
+        trail.age = 0;
+        if (Math.hypot(d.x - trail.points[trail.points.length - 1][0], d.y - trail.points[trail.points.length - 1][1]) > 2 * s)
+          trail.points.push([d.x, d.y]);
+        if (trail.points.length > 85) trail.points.shift();
+      }
+      for (const other of droplets) {
+        if (other === d || other.dead || other.r > d.r * 1.35) continue;
+        const distance = Math.hypot(other.x - d.x, other.y - d.y);
+        if (distance < (other.r + d.r) * .72) {
+          d.r = Math.min(6.5 * s, Math.sqrt(d.r * d.r + other.r * other.r * .85));
+          d.speed = Math.max(d.speed, 27 * s); other.dead = true; merges++;
         }
       }
-      appendDrop(center(end), end, (2.5 + rnd() * 2.6) * s, true);
-    }
-    for (let i = 0; i < Math.round(width * height / (700 * s * s) * state.density); i++) {
-      const r = (1 + Math.pow(rnd(), 1.5) * 4.6) * s, x = rnd() * width, y = rnd() * height;
-      if (drops.every(d => Math.hypot(d.x - x, (d.y - y) * .9) > (d.rx + r) * 1.1)) appendDrop(x, y, r, rnd() > .83);
-    }
-    for (let i = 0; i < Math.round(width * height / (60 * s * s) * state.density); i++) appendDrop(rnd() * width, rnd() * height, (.25 + Math.pow(rnd(), 2) * .8) * s);
-    for (const d of drops) {
-      const x0 = Math.max(0, Math.floor(d.x - d.rx * 1.23)), x1 = Math.min(width - 1, Math.ceil(d.x + d.rx * 1.23));
-      const y0 = Math.max(0, Math.floor(d.y - d.ry * 1.15)), y1 = Math.min(height - 1, Math.ceil(d.y + d.ry * 1.15));
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        const v = (y - d.y) / d.ry, u = (x - d.x) / (d.rx * (1 + .1 * v));
-        const angle = Math.atan2(v, u), outline = 1 + .045 * Math.sin(angle * 3 + d.phase) + .025 * Math.cos(angle * 5 - d.phase);
-        const radius = Math.hypot(u, v) / outline, edge = 1 - radius;
-        if (edge < 0) continue;
-        const alpha = clamp(edge * Math.min(d.rx, d.ry) * 1.6), dome = Math.sqrt(Math.max(.01, 1 - radius * radius));
-        const bending = (12 * s + d.rx * 2.8) * state.refraction;
-        const sx = d.x - u * bending, sy = height * .30 + d.y * .24 - v * height * .52 * state.refraction;
-        const rim = Math.exp(-edge * Math.min(d.rx, d.ry) * 1.8);
-        const light = Math.pow(Math.max(0, -.46 * u + .88 * v), 3), shade = Math.pow(Math.max(0, .35 * u - .93 * v), 2);
-        const glint = Math.exp(-((u + .23) ** 2 / .014 + (v + .47) ** 2 / .009)) * (d.rx > 3 * s ? 1 : .2);
-        const reflection = (light * 115 - shade * 22) * rim + glint * 18;
-        const index = (y * width + x) * 4;
-        for (let k = 0; k < 3; k++) {
-          const refracted = .10 + .45 * (1 - dome);
-          const transmitted = pixels[index + k] * (1 - refracted) + sample(sx, sy, k) * 1.025 * refracted + reflection * d.strength;
-          pixels[index + k] = clamp(pixels[index + k] * (1 - alpha) + transmitted * alpha, 0, 255);
-        }
+      if (d.y > h + d.r * 3) {
+        d.x = (random() * .88 + .06) * canvas.width;
+        d.y = -8 * s; d.r = (2.5 + random() * 1.7) * s;
+        d.hold = time + 1.5 + random() * 4; d.velocity = 0; d.trail = null;
       }
     }
-    fogContext.putImageData(output, 0, 0);
-    return fogged;
+    droplets = droplets.filter(d => !d.dead);
+    for (const trail of trails) trail.age += dt;
+    trails = trails.filter(t => t.age < 20).slice(-28);
   }
-  function render() {
-    const preview = banner.closest('#bn-home-preview');
-    if (dark === null || !banner.getClientRects().length || document.getElementById('bn-home')?.hidden || (preview?.dataset.view && preview.dataset.view !== 'home')) return;
-    const width = Math.round(banner.getBoundingClientRect().width);
-    if (width <= 0) return;
-    const key = width + '/' + dark;
-    if (key === lastRender) return;
-    lastRender = key;
-    const field = material(width * 2, 192, dark);
-    banner.width = width * 2; banner.height = 192;
-    banner.getContext('2d').drawImage(field, 0, 0);
+
+  function outline(d) {
+    const r = d.r, elongation = clamp(d.velocity / (35 * scale()), 0, 1);
+    const rx = r * d.round, top = -r * (1 + elongation * .6), bottom = r * .9;
+    ctx.beginPath(); ctx.moveTo(d.lean * r, top);
+    ctx.bezierCurveTo(rx * .65, top * .97, rx * 1.05, -r * .38, rx, r * .12);
+    ctx.bezierCurveTo(rx * .94, bottom * .8, rx * .28, bottom * 1.08, 0, bottom);
+    ctx.bezierCurveTo(-rx * .7, bottom, -rx * 1.03, r * .54, -rx, 0);
+    ctx.bezierCurveTo(-rx * 1.06, -r * .5, -rx * .62, top, d.lean * r, top);
+    ctx.closePath();
+    return { rx, top, bottom };
   }
-  let resizeFrame = 0;
-  const scheduleResize = () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(render); };
-  const resize = new ResizeObserver(scheduleResize);
-  resize.observe(banner);
-  return { render(theme) { dark = theme; render(); } };
+  function drawTrail(trail) {
+    if (trail.points.length < 2) return;
+    const fade = Math.min(1, (20 - trail.age) / 5), points = trail.points;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // A wet trace is a faint clear ribbon, with an uneven contact edge.
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const half = Math.max(.5, trail.r * (.42 + .14 * Math.sin(i * .64)));
+      const p = points[i]; if (!i) ctx.moveTo(p[0] - half, p[1]); else ctx.lineTo(p[0] - half, p[1]);
+    }
+    for (let i = points.length - 1; i >= 0; i--) {
+      const half = Math.max(.5, trail.r * (.42 + .14 * Math.sin(i * .64)));
+      ctx.lineTo(points[i][0] + half, points[i][1]);
+    }
+    ctx.closePath(); ctx.save(); ctx.clip(); ctx.globalAlpha = .22 * fade;
+    ctx.drawImage(source, 0, 0); ctx.restore();
+    ctx.beginPath(); ctx.moveTo(...points[0]);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(...points[i]);
+    ctx.lineWidth = Math.max(.45, trail.r * .34);
+    ctx.strokeStyle = `rgba(17,35,21,${.075 * fade})`; ctx.stroke();
+    ctx.restore();
+  }
+  function drawDrop(d) {
+    const r = d.r, s = scale();
+    ctx.save(); ctx.translate(d.x, d.y);
+    const shape = outline(d);
+    ctx.save(); ctx.clip();
+    // A water lens contains a compressed/inverted view of the scene, rather
+    // than a white fill. An uneven light/dark rim completes the contact edge.
+    const sample = Math.max(14 * s, r * 9), sx = clamp(d.x - sample / 2, 0, canvas.width - sample);
+    const sy = clamp(d.y - sample / 2, 0, canvas.height - sample);
+    ctx.save(); ctx.scale(-1, -1);
+    ctx.drawImage(source, sx, sy, sample, sample, -shape.rx, -shape.bottom,
+      shape.rx * 2, shape.bottom - shape.top);
+    ctx.restore();
+    const shade = ctx.createLinearGradient(-r, -r, r, r);
+    shade.addColorStop(0, 'rgba(9,20,11,.28)');
+    shade.addColorStop(.32, 'rgba(15,32,17,.05)');
+    shade.addColorStop(.68, 'rgba(231,242,230,.02)');
+    shade.addColorStop(1, 'rgba(247,252,240,.30)');
+    ctx.fillStyle = shade; ctx.fillRect(-r * 1.3, shape.top, r * 2.6, shape.bottom - shape.top);
+    ctx.restore();
+    outline(d); ctx.lineWidth = Math.max(.4, .36 * s);
+    ctx.strokeStyle = dark ? 'rgba(8,14,9,.65)' : 'rgba(9,25,12,.57)'; ctx.stroke();
+    // Uneven light rim and a small caustic; the centre stays transparent.
+    ctx.beginPath(); ctx.ellipse(r * .10, r * .06, shape.rx * .91, r * .82, 0, .1, 1.95);
+    ctx.lineWidth = Math.max(.45, .39 * s);
+    ctx.strokeStyle = dark ? 'rgba(236,246,227,.52)' : 'rgba(250,255,241,.77)'; ctx.stroke();
+    if (r > 1.2 * s) {
+      ctx.beginPath(); ctx.ellipse(-r * .32, -r * .48, r * .18, r * .25, -.5, 0, Math.PI * 2);
+      ctx.fillStyle = dark ? 'rgba(247,253,233,.45)' : 'rgba(253,255,246,.70)'; ctx.fill();
+    }
+    ctx.restore();
+  }
+  function paint() {
+    if (!ctx || dark === null) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!backdrop) { fallback(); canvas.dataset.ready = 'true'; return; }
+    ctx.drawImage(backdrop, 0, 0);
+    if (dark) { ctx.fillStyle = 'rgba(8,18,12,.34)'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    for (const trail of trails) drawTrail(trail);
+    for (const d of droplets) drawDrop(d);
+    canvas.dataset.ready = 'true';
+  }
+  function loop(t) {
+    if (!running) return;
+    if (!active() || reduced.matches) { sync(); return; }
+    const elapsed = t - lastPaint;
+    if (elapsed >= FRAME_INTERVAL) {
+      lastPaint = t; advance(Math.min(.1, elapsed / 1000)); paint();
+    }
+    frame = requestAnimationFrame(loop);
+  }
+  function sync() {
+    const go = active() && !reduced.matches && !!backdrop && dark !== null;
+    if (!go) {
+      cancelAnimationFrame(frame); running = false;
+    } else if (!running) {
+      running = true; lastPaint = performance.now();
+      frame = requestAnimationFrame(loop);
+    }
+  }
+  image.onload = () => { resize(); buildBackground(); paint(); sync(); };
+  image.onerror = () => { backdrop = null; source = null; paint(); sync(); };
+  image.src = 'https://bainiao.local/rain-background.webp';
+  new ResizeObserver(resize).observe(canvas);
+  new IntersectionObserver(entries => {
+    inView = !!entries[0]?.isIntersecting; sync();
+  }, { threshold: .01 }).observe(canvas);
+  document.addEventListener('visibilitychange', sync);
+  reduced.addEventListener('change', sync);
+  addEventListener('resize', resize);
+  addEventListener('pagehide', () => { cancelAnimationFrame(frame); running = false; });
+  return {
+    render(theme) {
+      const changed = dark !== !!theme; dark = !!theme;
+      if (!ctx) resize();
+      else if (changed) paint();
+      sync();
+    },
+    sync,
+  };
 })();

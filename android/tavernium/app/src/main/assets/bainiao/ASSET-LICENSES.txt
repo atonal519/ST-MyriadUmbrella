@@ -45,3 +45,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Rain-window background (rain-background.webp)
+Created specifically for this project with the built-in image generation tool.
+Independent AI-generated outdoor leaves and pale buildings; no third-party photograph used.
+The original generated image is resized and compressed for the local homepage.
+Water droplets and trails are drawn by the application, without runtime network assets.

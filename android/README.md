@@ -1,8 +1,8 @@
 # 千机伞 Android
 
-当前试用版：**0.1.9-trial**（versionCode 10）。
+当前试用版：**0.1.10-trial**（versionCode 11）。
 
-从 [Releases 下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.9-trial/qianjisan-0.1.9-trial.apk)，源码与构建文件位于本目录。
+从 [Releases 下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.10-trial/qianjisan-0.1.10-trial.apk)，源码与构建文件位于本目录。
 
 Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。线上更新源已接通，0.1.6 起可在首页右上角检查、下载更新，再按系统提示安装。
 
@@ -10,6 +10,9 @@ Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，�
 
 - 卡库每行四张，支持搜索、开场白分页和手动刷新，复用本次已读取的列表、详情和封面。
 - 后台保活、悬浮球分别设置。偏好、加载 GIF、图标与本地页面日夜颜色由 App 管理。
+- 首页使用动态雨窗，水珠聚集后滑落，跟随日夜配色。离开首页、切后台或横幅离开视窗时停止动画；减少动画时保留静态画面。
+- 酒馆操作使用柔和配色和状态灯。标题右侧的连接状态可点击刷新，独立“检查连接”行已合并。
+- 开启保活时不再主动降低隐藏网页的进程优先级，并为隐藏页的待执行绘制回调提供按需调度；手机后台初始化和生成的持续运行请以本版实测为准。
 - 更新说明、下载进度和安装权限说明使用页内弹窗，跟随系统日夜主题；关闭下载弹窗会取消下载，已下载安装包可继续安装。最后的安装确认由 Android 系统显示。
 - App 和酒馆扩展共仓维护，各自更新。服务端插件更新仍使用服务器管理员接口。
 
@@ -22,7 +25,7 @@ cd android/tavernium
 ./gradlew lintDebug assembleDebug
 ```
 
-安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.1.9-trial.apk`。本地重新构建会使用构建者自己的签名；仓库不包含发布签名密钥。
+安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.1.10-trial.apk`。本地重新构建会使用构建者自己的签名；仓库不包含发布签名密钥。
 
 ## 发布更新
 
@@ -32,7 +35,7 @@ APK 版本和 versionCode 在 `tavernium/app/build.gradle` 中维护。发布时
 2. 用 Android SDK 的 `aapt2`、`apksigner` 加入 PATH 后运行：
 
    ```sh
-   python3 scripts/create-trial-update.py qianjisan-0.1.9-trial.apk \
+   python3 scripts/create-trial-update.py qianjisan-0.1.10-trial.apk \
      --notes '本次更新说明' --output qianjisan-trial-update.json
    ```
 

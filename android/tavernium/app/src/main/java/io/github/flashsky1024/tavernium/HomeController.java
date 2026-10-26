@@ -141,10 +141,10 @@ final class HomeController {
                 String target=path.substring(7);if(!target.equals("ball")&&!target.equals("shortcut"))return empty(404);
                 return new WebResourceResponse("image/png",null,new FileInputStream(appearance.image(target)));
             }
-            String name="/home.html".equals(path)?"home.html":"/home.css".equals(path)?"home.css":"/home.js".equals(path)?"home.js":"/rain-glass.js".equals(path)?"rain-glass.js":"/icon-stone.png".equals(path)?"icon-stone.png":"/icon-bluebird.jpg".equals(path)?"icon-bluebird.jpg":"/icon-redbird.jpg".equals(path)?"icon-redbird.jpg":"/LICENSE.txt".equals(path)?"LICENSE.txt":"/ASSET-LICENSES.txt".equals(path)?"ASSET-LICENSES.txt":null;
+            String name="/home.html".equals(path)?"home.html":"/home.css".equals(path)?"home.css":"/home.js".equals(path)?"home.js":"/rain-glass.js".equals(path)?"rain-glass.js":"/rain-background.webp".equals(path)?"rain-background.webp":"/icon-stone.png".equals(path)?"icon-stone.png":"/icon-bluebird.jpg".equals(path)?"icon-bluebird.jpg":"/icon-redbird.jpg".equals(path)?"icon-redbird.jpg":"/LICENSE.txt".equals(path)?"LICENSE.txt":"/ASSET-LICENSES.txt".equals(path)?"ASSET-LICENSES.txt":null;
             if(name==null)return empty(404);
-            String mime=name.endsWith("png")?"image/png":name.endsWith("jpg")?"image/jpeg":name.endsWith("css")?"text/css":name.endsWith("js")?"text/javascript":name.endsWith("txt")?"text/plain":"text/html";
-            return new WebResourceResponse(mime,name.endsWith("png")?null:"UTF-8",activity.getAssets().open("bainiao/"+name));
+            String mime=name.endsWith("png")?"image/png":name.endsWith("jpg")?"image/jpeg":name.endsWith("webp")?"image/webp":name.endsWith("css")?"text/css":name.endsWith("js")?"text/javascript":name.endsWith("txt")?"text/plain":"text/html";
+            return new WebResourceResponse(mime,name.endsWith("png")||name.endsWith("jpg")||name.endsWith("webp")?null:"UTF-8",activity.getAssets().open("bainiao/"+name));
         }catch(Exception e){PerfLog.w("HomeRequest","asset failed path="+uri.getPath());return empty(404);}
     }
     private WebResourceResponse empty(int status){return new WebResourceResponse("text/plain","UTF-8",status,"Unavailable",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
