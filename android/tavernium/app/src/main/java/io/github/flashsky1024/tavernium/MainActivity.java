@@ -198,6 +198,12 @@ public class MainActivity extends Activity {
     private static final int LOG_EXPORT_REQUEST = 1004;
     private static final int UPDATE_INSTALL_REQUEST = 1005;
     private boolean updateChecking;
+    private boolean updateSurfaceActive;
+    private boolean updateUiDestroyed;
+    private boolean startupUpdateChecked;
+    private boolean startupUpdateNoticePending;
+    private java.util.List<java.util.function.BiConsumer<String,String>> updateCheckWaiters;
+
     private UpdateManager.Release offeredUpdate;
     private java.util.concurrent.atomic.AtomicBoolean updateDownloadCancel;
     private boolean updatePermissionOpening;
@@ -318,10 +324,13 @@ public class MainActivity extends Activity {
             public void pickImage(String target) { chooseLocalImage(target); }
             public void checkUpdates(java.util.function.BiConsumer<String,String> completed) { MainActivity.this.checkUpdates(completed); }
             public void appUpdateAction(String operation) { MainActivity.this.appUpdateAction(operation); }
+            public boolean appResumed() { return activityResumed&&!updateUiDestroyed&&!isFinishing()&&!isDestroyed(); }
+            public void updateSurfaceChanged(boolean showing) { updateSurfaceActive=showing;showFloatingOverlay(); }
         }, this.appearance);
         if (this.serverUrl.isEmpty()) showHome();
         else enterBrowser();
         handleReplyIntent(getIntent());
+        startStartupUpdateCheck();
     }
 
     private void ensureIdleController() {
@@ -409,13 +418,19 @@ public class MainActivity extends Activity {
         }
         applyKeepScreenOn(this.webView != null && this.browserVisible
                 && this.prefs.getBoolean(PREF_KEEP_SCREEN_ON, true));
+        showFloatingOverlay();
+        PerfLog.i("PageSettings", "consumed browser=" + (this.webView != null && this.browserVisible)
+                + " keepalive=" + keepalive + " ball=" + this.prefs.getBoolean("ball_enabled", false));
+    }
+
+    private void showFloatingOverlay() {
+        if(this.appearance==null)return;
+        if(updateSurfaceActive||updateUiDestroyed){this.appearance.hideOverlay();return;}
         this.appearance.showOverlay(this.webView != null && this.browserVisible, () -> {
                     showHome();
                     startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP));
                 },
                 () -> { if (this.webView != null) this.webView.reload(); });
-        PerfLog.i("PageSettings", "consumed browser=" + (this.webView != null && this.browserVisible)
-                + " keepalive=" + keepalive + " ball=" + this.prefs.getBoolean("ball_enabled", false));
     }
 
     /** 保活服务、网页进程优先级和隐藏页面调度使用同一偏好，独立于悬浮球。 */
@@ -2147,24 +2162,53 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---------------- 用户手动检查 APK 更新 ----------------
+    // ---------------- APK 更新 ----------------
 
+    private void startStartupUpdateCheck() {
+        if(startupUpdateChecked)return;
+        startupUpdateChecked=true;
+        checkUpdates(null);
+    }
+
+    private void showStartupUpdateNotice() {
+        if(!startupUpdateNoticePending||!activityResumed||isFinishing()||isDestroyed())return;
+        startupUpdateNoticePending=false;
+        if(homeController!=null)homeController.showUpdate(true,browserVisible);
+    }
+
+    /** A manual check joins the startup request, receiving its actual result. */
     private void checkUpdates(java.util.function.BiConsumer<String,String> completed) {
-        if(updateDownloadCancel!=null){completed.accept(null,"正在下载更新，请稍候。");return;}
-        if (updateChecking) { completed.accept(null,"正在检查更新，请稍候。"); return; }
+        if(updateDownloadCancel!=null){if(completed!=null)completed.accept(null,"正在下载更新，请稍候。");return;}
+        if(updateCheckWaiters==null)updateCheckWaiters=new java.util.ArrayList<>();
+        if(completed!=null)updateCheckWaiters.add(completed);
+        if(updateChecking)return;
         updateChecking=true;
+        if(homeController!=null)homeController.updateCheckChanged("checking");
         new Thread(() -> {
-            try {
-                UpdateManager.Release release=GitHubUpdateSource.check(BuildConfig.VERSION_CODE);
-                runOnUiThread(() -> {
-                    updateChecking=false;
-                    completed.accept(release==null?"当前没有可用的新版本。":"发现新版本 "+release.versionName,null);
-                    if(release!=null && !isFinishing() && !isDestroyed())confirmUpdate(release);
-                });
-            } catch(Exception error) {
+            UpdateManager.Release candidate=null;
+            String failure=null;
+            try { candidate=GitHubUpdateSource.check(BuildConfig.VERSION_CODE); }
+            catch(Exception error) {
                 PerfLog.w("AppUpdate","check failed type="+error.getClass().getSimpleName());
-                runOnUiThread(() -> {updateChecking=false;completed.accept(null,updateFailure(error));});
+                failure=updateFailure(error);
             }
+            final UpdateManager.Release release=candidate;
+            final String error=failure;
+            runOnUiThread(() -> {
+                updateChecking=false;
+                java.util.List<java.util.function.BiConsumer<String,String>> waiters=updateCheckWaiters;
+                updateCheckWaiters=new java.util.ArrayList<>();
+                if(updateUiDestroyed||isFinishing()||isDestroyed())return;
+                if(homeController!=null)homeController.updateCheckChanged(error!=null?"unknown":release==null?"current":"available");
+                if(release!=null){
+                    offeredUpdate=release;pendingUpdate=null;pendingUpdateApk=null;
+                    updateState("available","",0,0);
+                    if(waiters.isEmpty()){startupUpdateNoticePending=true;showStartupUpdateNotice();}
+                    else {startupUpdateNoticePending=false;if(homeController!=null)homeController.showUpdate(false,browserVisible);}
+                }
+                for(java.util.function.BiConsumer<String,String> waiter:waiters)
+                    waiter.accept(error==null?(release==null?"当前没有可用的新版本。":"发现新版本 "+release.versionName):null,error);
+            });
         },"qianjisan-update-check").start();
     }
 
@@ -2185,10 +2229,11 @@ public class MainActivity extends Activity {
         offeredUpdate=release;
         pendingUpdate=null;pendingUpdateApk=null;
         updateState("available","",0,0);
+        if(homeController!=null)homeController.showUpdate(false,browserVisible);
     }
 
     private void updateState(String phase,String message,int percent,long downloaded) {
-        if(homeController==null||isFinishing()||isDestroyed())return;
+        if(homeController==null||updateUiDestroyed||isFinishing()||isDestroyed())return;
         try {
             JSONObject value=new JSONObject().put("phase",phase).put("message",message)
                     .put("percent",percent).put("downloaded",UpdateManager.formatSize(downloaded));
@@ -2200,6 +2245,10 @@ public class MainActivity extends Activity {
 
     private void appUpdateAction(String operation) {
         switch(operation) {
+            case "dismiss":
+                if(updateDownloadCancel!=null){updateDownloadCancel.set(true);updateState("cancelling","正在取消下载…",0,0);}
+                if(homeController!=null)homeController.dismissUpdate();
+                return;
             case "download":
                 if(offeredUpdate==null)throw new IllegalStateException("请先检查更新。");
                 if(updateDownloadCancel==null)startUpdateDownload(offeredUpdate);
@@ -2242,7 +2291,7 @@ public class MainActivity extends Activity {
                     if(updateDownloadCancel!=cancel)return;
                     updateDownloadCancel=null;
                     if(cancel.get()){updateState("cancelled","下载已取消。",0,0);return;}
-                    if(!isFinishing()&&!isDestroyed()){
+                    if(!updateUiDestroyed&&!isFinishing()&&!isDestroyed()){
                         pendingUpdate=release;pendingUpdateApk=apk;
                         requestUpdateInstall(release,apk);
                     }
@@ -2564,6 +2613,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int i, int i2, Intent intent) {
         if(i==UPDATE_INSTALL_REQUEST) {
             updatePermissionOpening=false;
+            if(updateUiDestroyed||isFinishing()||isDestroyed())return;
             UpdateManager.Release release=pendingUpdate;File apk=pendingUpdateApk;
             if(release!=null && apk!=null) {
                 if(UpdateManager.canInstall(this))installApk(apk);
@@ -2838,6 +2888,7 @@ public class MainActivity extends Activity {
             hideCustomView();
             return;
         }
+        if(this.homeController!=null&&this.homeController.updateOverlayOpen()){this.homeController.back(()->appUpdateAction("dismiss"));return;}
         WebView wv = this.webView;
         if (wv != null && this.browserVisible) showHome();
         else if (this.homeController != null) this.homeController.back(this::finish);
@@ -2908,6 +2959,7 @@ public class MainActivity extends Activity {
         }
         // 此处仅同步执行策略，不重复注入下载、加载动画等完整页面脚本。
         this.activityResumed = false;
+        if(this.homeController!=null)this.homeController.visibilityChanged(false);
         applyBackgroundExecutionPolicy();
         if (this.idleController != null) this.idleController.pause();
     }
@@ -2918,7 +2970,9 @@ public class MainActivity extends Activity {
         PerfLog.d(TAG, "onResume");
         this.activityResumed = true;
         applySystemBars();
-        if (this.homeController != null) this.homeController.stateChanged();
+        if (this.homeController != null) {this.homeController.visibilityChanged(!this.browserVisible);this.homeController.stateChanged();}
+        showStartupUpdateNotice();
+        if(this.homeController!=null)this.homeController.resumeUpdatePresentation();
         if (this.replyNotifier != null && !isBurnInIdle() && this.replyNotifier.screenAvailable()) {
             this.replyNotifier.clear();
         }
@@ -3000,7 +3054,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        updateUiDestroyed=true;
+        startupUpdateNoticePending=false;
         if(updateDownloadCancel!=null)updateDownloadCancel.set(true);
+        if(homeController!=null)homeController.dismissUpdate();
         closeBrowser();
         if (this.homeController != null) this.homeController.dispose();
         if (this.idleController != null) { this.idleController.dispose(); this.idleController = null; }

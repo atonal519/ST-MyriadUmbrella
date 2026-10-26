@@ -31,6 +31,7 @@ final class HomeController {
         void exportLog(); void pickImage(String target);
         void checkUpdates(java.util.function.BiConsumer<String,String> completed);
         void appUpdateAction(String operation);
+        boolean appResumed(); void updateSurfaceChanged(boolean showing);
     }
     private static final String ORIGIN = "https://bainiao.local";
     private final Activity activity;
@@ -44,6 +45,13 @@ final class HomeController {
     private final ServerPluginApi pluginApi = new ServerPluginApi();
     private WebView view;
     private JSONObject appUpdate;
+    private String appUpdateCheck="unknown";
+    private String updatePresentation="";
+    private boolean overlayOnly;
+    private boolean hostVisible;
+    private boolean uiReady;
+    private android.app.Dialog updateDialog;
+
     private String csrf = "";
     private String csrfOrigin = "";
 
@@ -75,10 +83,12 @@ final class HomeController {
             @Override public boolean shouldOverrideUrlLoading(WebView webView,WebResourceRequest request){return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView webView,WebResourceRequest request){return asset(request.getUrl());}
         });
-        view.loadUrl(ORIGIN+"/home.html");
+        view.loadUrl(ORIGIN+"/home.html"+(overlayOnly?"?updateOnly=1":""));
         return view;
     }
     void destroyView(){
+        dismissUpdate();
+        uiReady=false;
         if(view==null)return;
         view.removeJavascriptInterface("BainiaoNative");view.stopLoading();
         if(view.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)view.getParent()).removeView(view);
@@ -92,7 +102,52 @@ final class HomeController {
         if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.updateChanged("+value+")",null);
     }
     void visibilityChanged(boolean visible){
-        if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.setVisible("+visible+")",null);
+        hostVisible=visible;
+        if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.setVisible("+(visible&&!overlayOnly)+")",null);
+    }
+    void updateCheckChanged(String phase){appUpdateCheck=phase;stateChanged();}
+    boolean updateOverlayOpen(){return overlayOnly&&!updatePresentation.isEmpty();}
+    void showUpdate(boolean notice,boolean overBrowser){
+        overlayOnly=overBrowser;updatePresentation=notice?"notice":"details";
+        host.updateSurfaceChanged(true);
+        create();
+        resumeUpdatePresentation();
+    }
+    void resumeUpdatePresentation(){
+        if(!uiReady||updatePresentation.isEmpty()||!host.appResumed())return;
+        WebView page=view;
+        boolean notice="notice".equals(updatePresentation);
+        page.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.presentUpdate("+overlayOnly+","+notice+")",ignored->{
+            if(view!=page||!host.appResumed()||!overlayOnly||updatePresentation.isEmpty()||activity.isFinishing()||activity.isDestroyed()||updateDialog!=null)return;
+            if(page.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)page.getParent()).removeView(page);
+            android.app.Dialog dialog=new android.app.Dialog(activity);
+            updateDialog=dialog;
+            dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+            dialog.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.setContentView(page);
+            // Default Dialog cancellation covers both legacy Back and Android 13+ predictive Back.
+            dialog.setOnDismissListener(closed->{
+                if(updateDialog!=dialog)return;
+                updateDialog=null;
+                boolean external=!updatePresentation.isEmpty();
+                updatePresentation="";
+                if(page.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)page.getParent()).removeView(page);
+                overlayOnly=false;
+                page.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.endUpdatePresentation()",null);
+                host.updateSurfaceChanged(false);
+                if(external)host.appUpdateAction("dismiss");
+            });
+            dialog.show();
+            dialog.getWindow().setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+        });
+    }
+    void dismissUpdate(){
+        updatePresentation="";
+        if(updateDialog!=null){updateDialog.dismiss();return;}
+        overlayOnly=false;
+        if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.endUpdatePresentation()",null);
+        host.updateSurfaceChanged(false);
     }
     private JSONObject state(){
         JSONObject value=new JSONObject();
@@ -104,6 +159,10 @@ final class HomeController {
             value.put("username",connection.username);
             value.put("password",connection.password);
             value.put("version",BuildConfig.VERSION_NAME);
+            value.put("appUpdateCheck",appUpdateCheck);
+            value.put("overlayOnly",overlayOnly);
+            value.put("hostVisible",hostVisible&&!overlayOnly);
+            value.put("updatePresentation",updatePresentation);
             if(appUpdate!=null)value.put("appUpdate",appUpdate);
             value.put("frameRate",prefs.getInt("frame_rate_limit",0));
             value.put("idleMode",IdleController.readMode(prefs));
@@ -166,6 +225,10 @@ final class HomeController {
         try{
             switch(action){
                 case "state":reply(id,state(),null);return;
+                case "localReady":
+                    uiReady=true;reply(id,new JSONObject(),null);
+                    resumeUpdatePresentation();
+                    return;
                 case "checkUpdates":{
                     final WebView destination=view;
                     host.checkUpdates((message,error)->{
