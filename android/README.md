@@ -1,8 +1,8 @@
 # 千机伞 Android
 
-当前源码版本：**0.1.9-trial**（versionCode 10）。
+当前试用版：**0.1.9-trial**（versionCode 10）。
 
-安装包见 [Releases](https://github.com/atonal519/ST-MyriadUmbrella/releases)，源码与构建文件位于本目录。
+从 [Releases 下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.9-trial/qianjisan-0.1.9-trial.apk)，源码与构建文件位于本目录。
 
 Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。线上更新源已接通，0.1.6 起可在首页右上角检查、下载更新，再按系统提示安装。
 

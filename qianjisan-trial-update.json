@@ -1,16 +1,16 @@
 {
   "app": "io.github.bainiao.browser.trial",
-  "updatedAt": "2026-10-26T01:59:33.320244Z",
+  "updatedAt": "2026-10-26T03:06:12.589283Z",
   "releases": [
     {
-      "versionName": "0.1.8-trial",
-      "versionCode": 9,
-      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.8-trial/qianjisan-0.1.8-trial.apk",
-      "size": 3118129,
-      "sha256": "f2f57950434fd9288b8e8693ccaa325a81b04fa96ae7a49197d568ca6ea6142c",
+      "versionName": "0.1.9-trial",
+      "versionCode": 10,
+      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.9-trial/qianjisan-0.1.9-trial.apk",
+      "size": 3246492,
+      "sha256": "20d16bdaa3bce1649f2bb0d53250e57187a77185e3026d50c8ac8533b4cd7c82",
       "date": "2026-10-26",
       "channel": "trial",
-      "notes": "连接区第二行改为左侧关闭页面、右侧进入酒馆，便于右手操作。"
+      "notes": "更新说明、下载进度和安装权限说明改为页内弹窗，跟随系统日夜主题。关闭下载弹窗会取消下载，已下载的安装包可继续安装。最后的安装确认仍由Android系统显示。"
     }
   ]
 }
