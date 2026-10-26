@@ -1,0 +1,16 @@
+{
+  "app": "io.github.bainiao.browser.trial",
+  "updatedAt": "2026-10-26T01:59:33.320244Z",
+  "releases": [
+    {
+      "versionName": "0.1.8-trial",
+      "versionCode": 9,
+      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.1.8-trial/qianjisan-0.1.8-trial.apk",
+      "size": 3118129,
+      "sha256": "f2f57950434fd9288b8e8693ccaa325a81b04fa96ae7a49197d568ca6ea6142c",
+      "date": "2026-10-26",
+      "channel": "trial",
+      "notes": "连接区第二行改为左侧关闭页面、右侧进入酒馆，便于右手操作。"
+    }
+  ]
+}
