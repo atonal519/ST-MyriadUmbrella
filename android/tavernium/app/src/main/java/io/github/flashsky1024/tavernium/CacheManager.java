@@ -964,7 +964,18 @@ public class CacheManager {
     /** 直连下载（供"保存到下载目录"使用），不经缓存、不整包进内存。 */
     public InputStream fetchStream(String url, String method, String userAgent,
                                    String user, String pass) throws IOException {
+        return fetchStream(url, method, userAgent, user, pass, null);
+    }
+
+    /** 仅直连下载复用当前酒馆登录 Cookie，携会话的请求不自动跟随跳转。 */
+    public InputStream fetchStream(String url, String method, String userAgent,
+                                   String user, String pass, String cookie) throws IOException {
         HttpURLConnection conn = openConnection(url, userAgent, user, pass);
+        if (cookie != null && !cookie.isEmpty()
+                && UrlKit.isSameOrigin(url, this.credentialOrigin)) {
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestProperty("Cookie", cookie);
+        }
         if (method != null && !method.isEmpty()) {
             conn.setRequestMethod(method);
         }
