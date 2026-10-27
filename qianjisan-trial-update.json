@@ -1,16 +1,16 @@
 {
   "app": "io.github.bainiao.browser.trial",
-  "updatedAt": "2026-10-26T11:48:06.008443Z",
+  "updatedAt": "2026-10-27T02:20:55.283520Z",
   "releases": [
     {
-      "versionName": "0.2.1",
-      "versionCode": 17,
-      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.1/qianjisan-0.2.1.apk",
-      "size": 3252193,
-      "sha256": "81fd55aeeae52f49e2406a5a8735ba1c1a3d623c9a79c1a79485311c13b654e0",
-      "date": "2026-10-26",
+      "versionName": "0.2.2",
+      "versionCode": 20,
+      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.2/qianjisan-0.2.2.apk",
+      "size": 3252449,
+      "sha256": "380008e6c7facb2f985d2730dee2ef6a9fdfd3c32eccb37eb1b782cd4907036c",
+      "date": "2026-10-27",
       "channel": "trial",
-      "notes": "0.2.1 公开版本，已通过用户真机验证。已有千机伞用户可直接覆盖安装，保留连接、登录和本机偏好。\n\n- 补齐后台网页的原生窗口保活，修复切到其他 App 后生成暂停的问题；返回首页也保留同一酒馆页。\n- 偏好新增“显示手机状态栏”开关，默认开启；状态栏颜色跟随酒馆主题，时间、电量图标自动选择深浅。\n- 防烧屏模式同时隐藏顶部状态栏和底部导航；解除后恢复当前偏好。本地首页和更新弹窗仍按 App 日夜主题显示。\n\nAPK 与酒馆前端扩展分别更新。此次为 APK 更新，前端扩展仍为 0.1.1。"
+      "notes": "0.2.2 公开版本。已有千机伞用户可直接覆盖安装，保留连接、登录和本机偏好。\n\n- 修复普通图片点击下载无反应的问题，保留原有 Blob 文件导出。\n- 下载受登录保护的酒馆图片时复用当前会话，文件保存在手机“下载/SillyTavern”。\n- 修复部分美化主题将加载白鸽放大铺满屏幕的问题，保持小尺寸动画及酒馆原有加载流程。\n\nAPK 与酒馆前端扩展分别更新。此次为 APK 更新，前端扩展仍为 0.1.1。"
     }
   ]
 }
