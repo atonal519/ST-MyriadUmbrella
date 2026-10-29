@@ -1,16 +1,16 @@
 {
   "app": "io.github.bainiao.browser.trial",
-  "updatedAt": "2026-10-27T10:27:09.273679Z",
+  "updatedAt": "2026-10-29T10:23:35.379916Z",
   "releases": [
     {
-      "versionName": "0.2.3",
-      "versionCode": 22,
-      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.3/qianjisan-0.2.3.apk",
-      "size": 3252657,
-      "sha256": "9bf63409be9d24fa30af078f1c84d9bc4ee19aa26e8d03ba6daf697396d23c85",
-      "date": "2026-10-27",
+      "versionName": "0.2.4",
+      "versionCode": 24,
+      "url": "https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.4/qianjisan-0.2.4.apk",
+      "size": 3257647,
+      "sha256": "83bb23e71f4d7da42b6a18085103d735dd33615dd02839e8a400bde233e0153c",
+      "date": "2026-10-29",
       "channel": "trial",
-      "notes": "0.2.3 公开版本。已有千机伞用户可直接覆盖安装，保留连接、登录和本机偏好。\n\n- 修复预设、世界书、主题、人格、正则和 QR 等导出点击后无反应的问题。\n- 补全临时下载链接、Blob/data 文件及弹层头像下载，保留文件名和原始内容。\n- 普通图片下载继续可用，文件保存在手机“下载/SillyTavern”。\n\nAPK 与酒馆前端扩展分别更新。此次为 APK 更新，前端扩展仍为 0.1.1。\n"
+      "notes": "0.2.4 公开版本。已有千机伞用户可直接覆盖安装，保留连接、登录和本机偏好。\n\n- App 主页卡库下方新增「主题联动」抽屉，位于「偏好设置」上方，方便随时切换。\n- 分别选择已保存的浅色、深色酒馆主题，开启「跟随系统深浅色」后，随手机系统模式自动应用对应主题。默认关闭，关闭后保留当前主题。\n- 修复 Luker 已加载后仍提示“酒馆尚未就绪”、无法选择主题的问题。\n\n本次正式包与已实测的 test2（versionCode 24）相同，已安装 test2 的用户无需重复升级。"
     }
   ]
 }
