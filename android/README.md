@@ -1,13 +1,15 @@
 # 千机伞 Android
 
-当前公开版本：**0.2.3**（versionCode 22）。
+当前公开版本：**0.2.4**（versionCode 24）。
 
-从 [Releases 下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.3/qianjisan-0.2.3.apk)，源码与构建文件位于本目录。
+从 [Releases 下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.4/qianjisan-0.2.4.apk)，源码与构建文件位于本目录。
 
-Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。旧版可在首页右上角检查、下载更新，再按系统提示覆盖安装。0.2.3 启动后会静默检查一次；发现更高版本时，可直接在当前酒馆页面上方查看提醒，点“稍后”继续原页面。首页仍保留手动检查。
+Android 7.0 及以上可用。已有千机伞试用版可直接覆盖安装，保留本机连接与偏好。旧版可在首页右上角检查、下载更新，再按系统提示覆盖安装。0.2.4 启动后会静默检查一次；发现更高版本时，可直接在当前酒馆页面上方查看提醒，点“稍后”继续原页面。首页仍保留手动检查。
 
 这是连接自有 SillyTavern / Luker 服务端的 WebView 浏览器。首页集中放置连接、服务端插件状态、卡库与设置。返回首页会保留当前酒馆页，点右侧“返回酒馆”继续原页面；需要重新加载时，先点左侧“关闭页面”再进入。
 
+- 首页卡库下方新增「主题联动」抽屉，可绑定浅色、深色两套已保存的酒馆主题，开启后随手机系统模式自动切换。默认关闭，关闭后保留当前酒馆主题。
+- 修复 Luker 已加载后主题列表仍提示“酒馆尚未就绪”的问题。
 - 支持预设、世界书、主题、人格、正则、QR 等共用的 Blob/data 文件导出，兼容临时下载链接和弹层中的头像下载；普通图片及受登录保护的 HTTP 下载复用当前会话，文件保存在手机“下载/SillyTavern”。网页生成的 Blob 文件保留约 48 MiB 的原有大小上限。
 - 加载白鸽保持固定小尺寸，避免部分美化主题把动画放大铺满屏幕；保留原生酒馆的标志、初始化文字和加载结束时机。
 - 卡库每行四张，支持搜索、开场白分页和手动刷新，复用本次已读取的列表、详情和封面。
@@ -28,7 +30,7 @@ cd android/tavernium
 ./gradlew lintDebug assembleDebug
 ```
 
-安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.2.3.apk`。当前公开附件沿用上述已验证的 debug 构建流程与维护者保留的同一签名，兼容已有安装；仓库不包含签名私钥。本地重新构建会使用构建者自己的签名。
+安装包位于 `app/build/outputs/apk/debug/qianjisan-debug-0.2.4.apk`。当前公开附件沿用上述已验证的 debug 构建流程与维护者保留的同一签名，兼容已有安装；仓库不包含签名私钥。本地重新构建会使用构建者自己的签名。
 
 ## 发布更新
 
@@ -38,13 +40,13 @@ APK 版本和 versionCode 在 `tavernium/app/build.gradle` 中维护。发布时
 2. 用 Android SDK 的 `aapt2`、`apksigner` 加入 PATH 后运行：
 
    ```sh
-   python3 scripts/create-trial-update.py qianjisan-0.2.3.apk \
+   python3 scripts/create-trial-update.py qianjisan-0.2.4.apk \
      --notes '本次更新说明' --output qianjisan-trial-update.json
    ```
 
 3. 将 APK 上传到本仓库对应的 `apk-v<versionName>` Release，再更新仓库 main 根目录的 `qianjisan-trial-update.json`。
 
-为兼容已安装的旧客户端，清单内部 `channel` 仍保留 `trial`；它与 GitHub Release 的 prerelease 标记独立，0.2.3 为正式公开发布。不要直接改为 `stable`，旧客户端会过滤掉该条更新。
+为兼容已安装的旧客户端，清单内部 `channel` 仍保留 `trial`；它与 GitHub Release 的 prerelease 标记独立，0.2.4 为正式公开发布。不要直接改为 `stable`，旧客户端会过滤掉该条更新。
 
 App 直接读取固定 Raw 清单，按实际版本、文件大小、SHA256、应用包名和签名核验安装包。前端插件版本使用独立的扩展清单。
 

@@ -181,6 +181,8 @@ public class MainActivity extends Activity {
     private String replyScript = EMPTY;
     private String hostLoaderScript = EMPTY;
     private String hostThemeBarsScript = EMPTY;
+    private String hostThemeLinkageScript = EMPTY;
+    private String themeDocumentToken = EMPTY;
     private String wineThemeTint = EMPTY;
     private String wineThemeText = EMPTY;
     private static final String LOADING_GIF_PATH = "/__qianjisan__/loading-animation.gif";
@@ -306,6 +308,15 @@ public class MainActivity extends Activity {
         } catch (IOException error) {
             PerfLog.w(TAG, "host theme bars unavailable");
         }
+        try (InputStream in = getAssets().open("bainiao/host-theme-linkage.js")) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+            this.hostThemeLinkageScript = new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            PerfLog.w(TAG, "host theme linkage unavailable");
+        }
         try {
             // 进程 fork 时刻：与 onPageFinished 相减得到真实冷启动耗时
             this.processStartMs = Process.getStartElapsedRealtime();
@@ -332,6 +343,7 @@ public class MainActivity extends Activity {
             public void closeBrowser() { MainActivity.this.closeBrowser(); MainActivity.this.showHome(); }
             public boolean browserOpen() { return MainActivity.this.webView != null; }
             public void settingsChanged(String key) { applyLocalSetting(key); }
+            public void readThemes(java.util.function.BiConsumer<org.json.JSONObject,String> completed) { MainActivity.this.readThemes(completed); }
             public void clearConnection(boolean delete, Runnable completed) { MainActivity.this.clearConnection(delete, completed); }
             public void clearLegacyCache() { if (cacheManager != null) cacheManager.clearCache(); }
             public void openSystemPermission(String target) { MainActivity.this.openSystemPermission(target); }
@@ -411,6 +423,7 @@ public class MainActivity extends Activity {
             applyFrameRateLimit(effectiveFrameRate());
             applyIdleMode(idleMode());
             applyPageSettings();
+            injectThemeLinkage(this.webView, true);
             PerfLog.i("Browser", "resumed retained page");
             return;
         }
@@ -507,6 +520,10 @@ public class MainActivity extends Activity {
     }
 
     private void applyLocalSetting(String key) {
+        if (key.equals("themeLinkage") || key.equals("lightTheme") || key.equals("darkTheme")) {
+            injectThemeLinkage(this.webView, false);
+            return;
+        }
         PerfLog.setVerbose(this.prefs.getBoolean(PREF_VERBOSE_LOG, false));
         if (key.equals("replyNotifications")) {
             if (!this.prefs.getBoolean(PREF_REPLY_NOTIFICATIONS, false)) this.replyNotifier.clear();
@@ -863,6 +880,49 @@ public class MainActivity extends Activity {
         target.evaluateJavascript("(function(raw,token){if(window.top!==window||location.origin!==" + origin
                 + ")return;" + this.hostThemeBarsScript
                 + "(function(tint,text){raw.themeColor(token,tint,text);},token);})(window.TavernKeep,'" + token + "');", null);
+    }
+
+    private void injectThemeLinkage(WebView target, boolean entering) {
+        if (target == null || target != this.webView || this.hostThemeLinkageScript.isEmpty()) return;
+        String token = this.bridgeSession.tokenFor(target.getUrl(), this.serverUrl);
+        // A new navigation token exists before WebView replaces the old DOM.
+        if (token.isEmpty() || !token.equals(this.themeDocumentToken)) return;
+        org.json.JSONObject policy = new org.json.JSONObject();
+        try {
+            policy.put("enabled", this.prefs.getBoolean("theme_linkage", false));
+            policy.put("dark", (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES);
+            policy.put("lightTheme", this.prefs.getString("theme_light", ""));
+            policy.put("darkTheme", this.prefs.getString("theme_dark", ""));
+        } catch (org.json.JSONException ignored) { return; }
+        String origin = org.json.JSONObject.quote(UrlKit.originOf(this.serverUrl));
+        target.evaluateJavascript("(function(raw,token){if(window.top!==window||location.origin!==" + origin
+                + ")return;" + this.hostThemeLinkageScript
+                + "(function(){raw.themesReady(token);},token," + policy + "," + entering + ");})(window.TavernKeep,'" + token + "');", null);
+    }
+
+    private org.json.JSONObject unavailableThemes(boolean open) {
+        org.json.JSONObject value = new org.json.JSONObject();
+        try { value.put("open", open); value.put("ready", false); value.put("options", new org.json.JSONArray()); }
+        catch (org.json.JSONException ignored) { }
+        return value;
+    }
+
+    private void readThemes(java.util.function.BiConsumer<org.json.JSONObject,String> completed) {
+        final WebView target = this.webView;
+        final String token = target == null ? "" : this.bridgeSession.tokenFor(target.getUrl(), this.serverUrl);
+        if (token.isEmpty() || !token.equals(this.themeDocumentToken)) { completed.accept(unavailableThemes(target != null), null); return; }
+        target.evaluateJavascript("window.__qjsThemeLinkage ? window.__qjsThemeLinkage.read() : ({ready:false,options:[]})", result -> {
+            if (target != this.webView || !isTrustedPage(token)) {
+                completed.accept(unavailableThemes(this.webView != null), null); return;
+            }
+            try {
+                Object value = new org.json.JSONTokener(result).nextValue();
+                if (value instanceof org.json.JSONObject) {
+                    ((org.json.JSONObject) value).put("open", true);
+                    completed.accept((org.json.JSONObject) value, null);
+                } else completed.accept(unavailableThemes(true), null);
+            } catch (org.json.JSONException error) { completed.accept(null, "读取主题失败，请返回酒馆完成加载。"); }
+        });
     }
 
     private void clearHttpAuthentication() {
@@ -1358,8 +1418,10 @@ public class MainActivity extends Activity {
         @Override
         public void onPageCommitVisible(WebView webView, String url) {
             if (webView == MainActivity.this.webView) {
+                MainActivity.this.themeDocumentToken = MainActivity.this.bridgeSession.tokenFor(webView.getUrl(), MainActivity.this.serverUrl);
                 injectScripts(webView);
                 injectThemeBars(webView);
+                injectThemeLinkage(webView, false);
             }
         }
 
@@ -1427,8 +1489,10 @@ public class MainActivity extends Activity {
                         + " in " + cost + "ms (reload, process up " + upMs + "ms)");
             }
             PerfMonitor.setPageCounts(MainActivity.this.pageStarts, MainActivity.this.pageFinishes);
+            MainActivity.this.themeDocumentToken = MainActivity.this.bridgeSession.tokenFor(webView.getUrl(), MainActivity.this.serverUrl);
             injectScripts(webView);
             injectThemeBars(webView);
+            injectThemeLinkage(webView, false);
         }
 
         @Override
@@ -2663,6 +2727,18 @@ public class MainActivity extends Activity {
                 current.applySystemBars();
             });
         }
+
+        @JavascriptInterface
+        public void themesReady(final String token) {
+            final MainActivity current = this.activity;
+            if (current == null || !current.isTrustedPage(token)) return;
+            final WebView source = current.webView;
+            current.runOnUiThread(() -> {
+                if (source == null || source != current.webView || current.updateUiDestroyed
+                        || current.isDestroyed() || !current.isTrustedPage(token)) return;
+                if (current.homeController != null) current.homeController.themesReady();
+            });
+        }
     }
 
     /**
@@ -2981,7 +3057,7 @@ public class MainActivity extends Activity {
      * <p>manifest 里把这些变化声明成自己处理（configChanges），Activity 不重建、
      * WebView 不重载，正在聊的页面状态得以保留。这里只做必要的刷新：
      * 重算上滑解锁阈值（随屏高变化）、重新应用帧率（旋转后刷新率可能变）。
-     * 网页本身的主题/布局交给 SillyTavern 前端自行响应，不在此干预。</p>
+     * 开启主题联动时传递原生日夜模式，由宿主主题入口应用已选主题。</p>
      */
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
@@ -2991,6 +3067,7 @@ public class MainActivity extends Activity {
         if (this.homeController != null) this.homeController.stateChanged();
         PerfLog.d(TAG, "onConfigurationChanged: orientation=" + newConfig.orientation
                 + ", uiMode=" + Integer.toHexString(newConfig.uiMode));
+        injectThemeLinkage(this.webView, false);
         recalcIdleUnlockDistance();
         try {
             if (this.webView != null && this.browserVisible) applyFrameRateLimit(effectiveFrameRate());

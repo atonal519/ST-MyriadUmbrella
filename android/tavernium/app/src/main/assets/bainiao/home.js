@@ -5,6 +5,7 @@
  const names={ink:'墨伞',stone:'白鳥',moss:'青伞',bluebird:'蓝翼',redbird:'剪纸'};
  let updateActionBusy=false,updateOperation='',updateNotice=false,homeStatusStarted=false;
  let statusRequest=null;
+ let themeList={open:false,ready:false,options:[]},themeRead=0;
  const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
  const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
  systemTheme.addEventListener('change',()=>{if(typeof state.dark!=='boolean')bainiaoRainGlass.render(systemTheme.matches);});
@@ -94,13 +95,14 @@ SOFTWARE.
  function showView(view){
   if(currentView==='library'&&view!=='library'){closeDetail();clearCoverObserver();get('bn-detail-content').replaceChildren();}
   currentView=view;root.dataset.view=view;get('bn-home').hidden=view!=='home';get('bn-system-page').hidden=view!=='system';get('bn-library-page').hidden=view!=='library';bainiaoRainGlass.sync();feedback('');updateLoadingPreview();window.scrollTo(0,0);
+  if(view==='home')refreshThemes();
  }
  window.BainiaoApp={ready:false,resolve(id,result){const task=pending.get(id);if(!task)return;pending.delete(id);result.ok?task.resolve(result.value):task.reject(new Error(result.error||'操作未完成，请重试。'));},back(){
   if(get('bn-update-dialog').open){closeUpdate();return true;}
   if(get('bn-connection-dialog').open){closeEdit();return true;}
   if(!get('bn-card-detail').hidden){closeDetail();return true;}
   if(currentView!=='home'){showView('home');return true;}return false;
- },updateChanged(value){state.appUpdate=value;updateActionBusy=false;renderUpdate();},stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();}state={...state,...value};render();},setVisible(visible){state.hostVisible=visible;root.dataset.hostVisible=visible&&!state.overlayOnly?'true':'false';ensureHomeStatus();updateLoadingPreview();bainiaoRainGlass.sync();},presentUpdate(overlayOnly,notice){setUpdateMode(overlayOnly);if(!get('bn-update-dialog').open){updateNotice=notice;openUpdate();}},endUpdatePresentation(){get('bn-update-dialog').close();setUpdateMode(false);}};
+ },updateChanged(value){state.appUpdate=value;updateActionBusy=false;renderUpdate();},stateChanged(value){if(value.browserOpen===false&&state.browserOpen===true){cards=[];cardsLoaded=false;cardsSourceKey='';get('bn-cards').replaceChildren();themeRead++;themeList={open:false,ready:false,options:[]};}state={...state,...value};render();},setVisible(visible){state.hostVisible=visible;root.dataset.hostVisible=visible&&!state.overlayOnly?'true':'false';ensureHomeStatus();updateLoadingPreview();bainiaoRainGlass.sync();if(visible&&window.BainiaoApp.ready&&!state.overlayOnly)refreshThemes();},themesReady(){if(currentView==='home'&&state.hostVisible!==false&&!state.overlayOnly)refreshThemes();},presentUpdate(overlayOnly,notice){setUpdateMode(overlayOnly);if(!get('bn-update-dialog').open){updateNotice=notice;openUpdate();}},endUpdatePresentation(){get('bn-update-dialog').close();setUpdateMode(false);}};
  function ensureHomeStatus(){
   if(!homeStatusStarted&&window.BainiaoApp.ready&&!state.overlayOnly&&state.hostVisible!==false&&state.url){homeStatusStarted=true;act(refreshStatus)();}
  }
@@ -125,8 +127,28 @@ SOFTWARE.
   get('bn-frame-summary').textContent=state.frameRate?state.frameRate+' fps':'跟随系统';get('bn-idle-summary').textContent=['关闭','普通','防烧屏'][state.idleMode||0];get('bn-version').textContent=state.version||'';get('bn-app-update-version').textContent=state.version?'v'+state.version:'';
   root.querySelectorAll('[data-frame]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.frame)===(state.frameRate||0))));root.querySelectorAll('[data-idle]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.idle)===(state.idleMode||0))));
   get('bn-loading-animation-description').textContent=state.loadingAnimationCustom?'自定义 GIF':'小鸽子';get('bn-loading-animation-reset').disabled=!state.loadingAnimationCustom;updateLoadingPreview();
-  renderUpdate();iconize();
+  renderThemes();renderUpdate();iconize();
  }
+ function renderThemes(){
+  get('bn-theme-follow').checked=state.themeLinkage===true;get('bn-theme-summary').textContent=state.themeLinkage?'跟随系统':'未开启';
+  const missing=[];
+  for(const [id,key,label]of [['bn-light-theme','lightTheme','浅色'],['bn-dark-theme','darkTheme','深色']]){
+   const select=get(id),value=state[key]||'',options=themeList.options||[],available=options.some(option=>option.value===value);
+   select.replaceChildren(new Option('请选择主题',''));
+   for(const option of options)select.add(new Option(option.label,option.value));
+   if(value&&!available)select.add(new Option('未找到：'+value,value));
+   select.value=value;select.disabled=!themeList.ready;
+   if(!value||!available)missing.push(label+(value?'主题已不存在':'主题未选择'));
+  }
+  get('bn-theme-hint').textContent=!themeList.open?'先进入酒馆，读取已保存的主题。':themeList.controlAvailable&&!themeList.options.length?'暂未找到已保存的主题，请先在酒馆保存主题。':!themeList.ready?'酒馆尚未就绪，请先进入酒馆完成加载。':missing.length?missing.join('；')+'，请选择已保存的主题。':'系统变为浅色或深色时，应用对应主题。';
+ }
+ async function refreshThemes(){
+  const read=++themeRead;
+  try{const value=await request('themes');if(read!==themeRead)return;themeList=value;renderThemes();}
+  catch(error){if(read===themeRead)get('bn-theme-hint').textContent=error.message;}
+ }
+ get('bn-theme-linkage').addEventListener('toggle',()=>{if(get('bn-theme-linkage').open)refreshThemes();});
+ for(const [id,key]of [['bn-theme-follow','themeLinkage'],['bn-light-theme','lightTheme'],['bn-dark-theme','darkTheme']])get(id).onchange=act(async()=>{try{await setPreference(key,id==='bn-theme-follow'?get(id).checked:get(id).value);}catch(error){renderThemes();throw error;}});
  async function setPreference(key,value){const updated=await request('setting',{key,value});state={...state,[key]:value,...updated};render();}
  function panel(button,content){get(button).onclick=()=>{const open=get(content).hidden;get(content).hidden=!open;get(button).setAttribute('aria-expanded',String(open));updateLoadingPreview();};}
  panel('bn-ball-style-toggle','bn-ball-editor');panel('bn-icon-toggle','bn-icon-editor');panel('bn-loading-animation-toggle','bn-loading-animation-editor');
@@ -286,5 +308,5 @@ SOFTWARE.
  get('bn-card-search').oninput=renderCards;get('bn-library-back').onclick=()=>showView('home');get('bn-detail-close').onclick=closeDetail;get('bn-card-detail').onclick=event=>{if(event.target===event.currentTarget)closeDetail();};
  get('bn-greeting-prev').onclick=()=>{if(currentDetail?.page>0){currentDetail.page--;showGreeting();}};get('bn-greeting-next').onclick=()=>{if(currentDetail&&currentDetail.page<currentDetail.greetings.length-1){currentDetail.page++;showGreeting();}};
  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&currentDetail){event.preventDefault();closeDetail();}});
- iconize();request('state').then(value=>{state=value;render();resetStatus();window.BainiaoApp.ready=true;ensureHomeStatus();if(state.updatePresentation){updateNotice=state.updatePresentation==='notice';openUpdate();}request('localReady').catch(()=>{});}).catch(error=>feedback(error.message,true));
+ iconize();request('state').then(value=>{state=value;render();resetStatus();window.BainiaoApp.ready=true;ensureHomeStatus();if(!state.overlayOnly&&state.hostVisible!==false)refreshThemes();if(state.updatePresentation){updateNotice=state.updatePresentation==='notice';openUpdate();}request('localReady').catch(()=>{});}).catch(error=>feedback(error.message,true));
 })();

@@ -32,6 +32,7 @@ final class HomeController {
         void checkUpdates(java.util.function.BiConsumer<String,String> completed);
         void appUpdateAction(String operation);
         boolean appResumed(); void updateSurfaceChanged(boolean showing);
+        void readThemes(java.util.function.BiConsumer<JSONObject,String> completed);
     }
     private static final String ORIGIN = "https://bainiao.local";
     private final Activity activity;
@@ -97,6 +98,7 @@ final class HomeController {
     void dispose(){destroyView();io.shutdown();libraryIo.shutdown();}
     void back(Runnable finish){if(view==null){finish.run();return;}view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.back()",value->{if(!"true".equals(value))finish.run();});}
     void stateChanged(){if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.stateChanged("+state()+")",null);}
+    void themesReady(){if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.themesReady()",null);}
     void updateChanged(JSONObject value){
         appUpdate=value;
         if(view!=null)view.evaluateJavascript("window.BainiaoApp && window.BainiaoApp.updateChanged("+value+")",null);
@@ -178,6 +180,9 @@ final class HomeController {
             value.put("keepScreenOn",prefs.getBoolean("keep_screen_on",true));
             value.put("showStatusBar",prefs.getBoolean("show_status_bar",true));
             value.put("ballEnabled",prefs.getBoolean("ball_enabled",false));
+            value.put("themeLinkage",prefs.getBoolean("theme_linkage",false));
+            value.put("lightTheme",prefs.getString("theme_light",""));
+            value.put("darkTheme",prefs.getString("theme_dark",""));
             value.put("ballSize",prefs.getInt("ball_size",48));value.put("ballOpacity",prefs.getInt("ball_opacity",90));
             value.put("ballShape",prefs.getString("ball_shape","circle"));value.put("ballPosition",prefs.getString("ball_position","right-bottom"));
             value.put("icon",prefs.getString("launcher_icon","ink"));
@@ -291,6 +296,10 @@ final class HomeController {
                         replyTo(destination,id,new JSONObject().put("text",text),null);
                     }catch(Exception error){replyTo(destination,id,null,"诊断读取失败，请稍后重试。");}});return;
                 }
+                case "themes":{
+                    final WebView destination=view;
+                    host.readThemes((value,error)->replyTo(destination,id,value,error));return;
+                }
                 case "setting":applySetting(data);host.settingsChanged(data.getString("key"));reply(id,state(),null);return;
                 case "enter":reply(id,new JSONObject(),null);host.enterBrowser();return;
                 case "closeBrowser":host.closeBrowser();reply(id,state(),null);return;
@@ -313,6 +322,9 @@ final class HomeController {
     private void applySetting(JSONObject data)throws Exception{
         String key=data.getString("key");SharedPreferences.Editor edit=prefs.edit();
         switch(key){
+            case "themeLinkage":edit.putBoolean("theme_linkage",data.getBoolean("value"));break;
+            case "lightTheme":edit.putString("theme_light",data.getString("value"));break;
+            case "darkTheme":edit.putString("theme_dark",data.getString("value"));break;
             case "frameRate":{
                 int value=data.getInt("value");if(value!=0&&(value<5||value>240))throw new Exception("请输入 5–240 之间的帧率。");
                 edit.putInt("frame_rate_limit",value);break;

@@ -30,3 +30,4 @@
 html[data-update-only="true"],html[data-update-only="true"] body,html[data-update-only="true"] #bn-home-preview .bn-app{background:transparent!important}
 html[data-update-only="true"] #bn-home-preview .bn-app>:not(#bn-update-dialog){display:none!important}
 #bn-home-preview #bn-tavern-title{font-size:17px;line-height:24px}
+#bn-home-preview .bn-theme-fields{padding-top:0;min-width:0}#bn-home-preview .bn-theme-fields select{min-width:0;max-width:100%;text-overflow:ellipsis}#bn-home-preview #bn-theme-hint{margin-top:10px;overflow-wrap:anywhere}
