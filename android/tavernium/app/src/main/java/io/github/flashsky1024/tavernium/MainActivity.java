@@ -328,10 +328,6 @@ public class MainActivity extends Activity {
         this.cacheManager.setCredentialOrigin(this.serverUrl);
         applySystemBars();
         applyKeepScreenOn(false);
-        if (Build.VERSION.SDK_INT >= 27) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
-        }
         this.handler = new Handler();
         ensureIdleController();
         this.appearance = new LocalAppearance(this, this.prefs);
