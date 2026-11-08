@@ -389,7 +389,7 @@ test('启动更名与手动 QR 开关共用一次在途更名，结束后不保�
     } finally { globalThis.SillyTavern = previous; }
 });
 
-test('收起贴边只露出 14px，展开后所有入口向下且留在屏幕内', async () => {
+test('收起贴边只露出 14px，底部向上展开且主球留在原位', async () => {
     const { layoutDock } = await import(`${path}dock-geometry.js`);
     for (const edge of ['left', 'right', '']) {
         const closed = layoutDock({ width: 390, height: 720, x: 120, y: 650, edge, open: false, count: 4 });
@@ -397,11 +397,15 @@ test('收起贴边只露出 14px，展开后所有入口向下且留在屏幕内
         if (edge === 'right') assert.equal(390 - closed.hub.x, 14);
         const opened = layoutDock({ width: 390, height: 720, x: 120, y: 650, edge, open: true, count: 4 });
         assert.equal(opened.slots.length, 4);
-        assert(opened.hub.y < opened.slots[0].y);
+        assert.equal(opened.hub.y, closed.hub.y);
+        assert.equal(opened.hub.y, 650);
+        assert.equal(opened.direction, 'up');
+        assert.equal(opened.listTop, 490);
+        assert(opened.slots.at(-1).y < opened.hub.y);
         for (let i = 0; i < opened.slots.length; i++) {
             const slot = opened.slots[i];
             assert(slot.x >= 0 && slot.x + slot.size <= 390);
-            assert(slot.y + slot.size <= 720);
+            assert(slot.y >= 6 && slot.y + slot.size <= 714);
             if (i) assert.equal(slot.y - opened.slots[i - 1].y - opened.slots[i - 1].size, 4);
         }
     }
@@ -660,5 +664,123 @@ test('代表性长正文只定位点击内容，较多悬浮球由可滚动区�
     assert.equal(locateText(raw, '唯一的修改目标。').start, raw.length - 8);
     const layout = layoutDock({ width: 320, height: 260, x: 310, y: 220, edge: 'right', open: true, count: 12 });
     assert(layout.visibleCount < 12);
-    assert(layout.hub.y + layout.columnHeight <= 254);
+    assert.equal(layout.hub.y, 220);
+    assert.equal(layout.direction, 'up');
+    assert(layout.columnTop >= 6 && layout.columnTop + layout.columnHeight <= 254);
+});
+
+
+test('展开按上下可用空间选择方向，完整槽位滚动且空添加入口参与布局', async () => {
+    const { layoutDock } = await import(`${path}dock-geometry.js`);
+    for (const value of [
+        { height: 720, y: 100, count: 4, direction: 'down', listTop: 136, visibleCount: 4 },
+        { height: 720, y: 650, count: 4, direction: 'up', listTop: 490, visibleCount: 4 },
+        { height: 300, y: 140, count: 20, direction: 'up', listTop: 20, visibleCount: 3 },
+        { height: 300, y: 100, count: 20, direction: 'down', listTop: 136, visibleCount: 4 },
+        { height: 720, y: 650, count: 0, direction: 'up', listTop: 610, visibleCount: 1 },
+        { height: 720, y: 100, count: 0, direction: 'down', listTop: 136, visibleCount: 1 },
+    ]) {
+        const input = { width: 390, x: 120, open: true, ...value };
+        const layout = layoutDock(input);
+        assert.equal(layout.hub.y, value.y);
+        assert.equal(layout.direction, value.direction);
+        assert.equal(layout.listTop, value.listTop);
+        assert.equal(layout.visibleCount, value.visibleCount);
+        assert.equal(layout.slots.length, value.count);
+        assert.equal(layout.listHeight, value.visibleCount * 40 - 4);
+        assert(layout.columnTop >= 6);
+        assert(layout.columnTop + layout.columnHeight <= value.height - 6);
+        const closed = layoutDock({ ...input, open: false });
+        assert.equal(layout.hub.y, closed.hub.y);
+        assert.equal(closed.columnHeight, 32);
+    }
+});
+
+test('柏宝绘仅识别原 ShadowRoot 球，保存宿主身份并找回同一原控件', async () => {
+    const { dockCompatibility } = await import(`${path}dock-compat.js`);
+    const { fingerprint, targetKey, findTarget } = await import(`${path}dock-targets.js`);
+    const selector = '.bbi-root[data-theme] > .bbi-orb[role="button"][aria-label="打开柏宝绘"]';
+    const root = { host: { id: 'bbi-app-host' }, querySelector: value => value === selector ? orb : null };
+    root.host.shadowRoot = root;
+    const orb = { getRootNode: () => root, matches: value => value === selector, getAttribute: key => key === 'aria-label' ? '打开柏宝绘' : '' };
+    assert.equal(dockCompatibility(orb)?.nativeDrop, true);
+    const value = fingerprint(orb);
+    assert.equal(value.elementId, 'bbi-app-host');
+    assert.equal(targetKey(value), 'id:bbi-app-host');
+    assert.equal(findTarget(value, { getElementById: () => root.host }), orb);
+    assert.equal(findTarget(value, { getElementById: () => null }), null);
+    assert.equal(dockCompatibility({ ...orb, getRootNode: () => ({ host: { id: 'other-host' } }) }), undefined);
+    assert.equal(dockCompatibility({ ...orb, matches: () => false }), undefined);
+    assert.equal(dockCompatibility({ ...root.host, getRootNode: () => ({}), matches: () => false }), undefined);
+});
+
+test('柏宝绘槽位用原键盘入口激活一次，准备收纳不发送误开面板的零位移手势', async () => {
+    const { activateCompatibleTarget, prepareCompatibleTarget, dockCompatibility } = await import(`${path}dock-compat.js`);
+    const root = { host: { id: 'bbi-app-host' } }; root.host.shadowRoot = root;
+    const events = [];
+    const element = {
+        getRootNode: () => root,
+        matches: selector => selector.startsWith('.bbi-root'),
+        dispatchEvent: event => events.push(event),
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 48, height: 48 }),
+        ownerDocument: { defaultView: { PointerEvent: class extends Event { constructor(type, options) { super(type, options); } }, KeyboardEvent: class extends Event { constructor(type, options) { super(type, options); this.key = options.key; } } } },
+        click() { throw new Error('柏宝绘无 click 入口'); },
+    };
+    const compatibility = dockCompatibility(element);
+    prepareCompatibleTarget(element, { pointerId: 1, pointerType: 'touch' });
+    assert.equal(events.length, 0);
+    await activateCompatibleTarget(element, compatibility);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'keydown');
+    assert.equal(events[0].key, 'Enter');
+});
+
+test('极短视口以实际可用高度滚动，展开不挤走主球', async () => {
+    const { layoutDock } = await import(`${path}dock-geometry.js`);
+    const layout = layoutDock({ width: 390, height: 100, x: 120, y: 34, open: true, count: 4 });
+    assert.equal(layout.hub.y, 34);
+    assert.equal(layout.direction, 'down');
+    assert.equal(layout.listTop, 70);
+    assert.equal(layout.listHeight, 24);
+    assert.equal(layout.columnTop + layout.columnHeight, 94);
+});
+
+test('柏宝绘收纳方形尺寸参与原投影居中，释放只移除收纳样式并恢复原位置', async () => {
+    const { holdTarget, placeTarget, releaseTarget } = await import(`${path}dock-targets.js`);
+    const values = new Map([['left', ['12px', '']], ['top', ['20px', '']], ['width', ['37px', '']], ['height', ['48px', '']]]);
+    const root = { host: { id: 'bbi-app-host' }, append(node) { node.isConnected = true; } }; root.host.shadowRoot = root;
+    const element = {
+        getRootNode: () => root, matches: selector => selector.startsWith('.bbi-root') || selector.startsWith('button,'),
+        querySelector: () => null, getBoundingClientRect: () => ({ width: 37, height: 48 }),
+        ownerDocument: { createElement: () => ({ isConnected: false, remove() { this.isConnected = false; } }) },
+        style: { getPropertyValue: key => values.get(key)?.[0] || '', getPropertyPriority: key => values.get(key)?.[1] || '',
+            setProperty: (key, value, priority = '') => values.set(key, [value, priority]), removeProperty: key => values.delete(key) },
+    };
+    const binding = holdTarget(element);
+    assert.equal(binding.width, 36); assert.equal(binding.height, 36);
+    placeTarget(binding, { left: 100, top: 200, width: 36, height: 36 }, true);
+    assert.equal(values.get('left')[0], '102px'); assert.equal(values.get('top')[0], '202px');
+    assert.equal(binding.collectedStyle.isConnected, true);
+    releaseTarget(binding);
+    assert.equal(binding.collectedStyle.isConnected, false);
+    assert.deepEqual(values.get('width'), ['37px', '']); assert.deepEqual(values.get('height'), ['48px', '']);
+    assert.deepEqual(values.get('left'), ['12px', '']); assert.deepEqual(values.get('top'), ['20px', '']);
+    assert.equal(values.has('scale'), false);
+});
+
+test('最近请求记录保留稳定宿主身份并激活原click入口，拖出沿原指针处理', async () => {
+    const { dockCompatibility, activateCompatibleTarget } = await import(`${path}dock-compat.js`);
+    const { fingerprint, targetKey, findTarget } = await import(`${path}dock-targets.js`);
+    const selector = '#rlog-badge-host.rlog-badge-host.rlog-floating-button[script_id="recent-request-log-badge"][role="button"]';
+    let opens = 0;
+    const element = { id: 'rlog-badge-host', matches: value => value === selector, getAttribute: () => '最近请求记录', click: () => opens++ };
+    const compatibility = dockCompatibility(element);
+    assert.equal(compatibility?.elementId, 'rlog-badge-host');
+    assert.equal(compatibility.nativeDrop, true);
+    const value = fingerprint(element);
+    assert.equal(targetKey(value), 'id:rlog-badge-host');
+    assert.equal(findTarget(value, { getElementById: id => id === element.id ? element : null }), element);
+    await activateCompatibleTarget(element, compatibility);
+    assert.equal(opens, 1);
+    assert.equal(dockCompatibility({ ...element, matches: () => false }), undefined);
 });

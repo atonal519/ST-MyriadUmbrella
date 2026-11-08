@@ -56,6 +56,11 @@ function paintGlow(control, slot, visible) {
 
 export function installDock() {
     const { host, root } = shadowHost('st-tools-dock', css);
+    const nativeTouchStyle = document.createElement('style');
+    // The original badge's pointer handlers need touch panning disabled before
+    // pointerdown, including when the badge appears after the dock starts.
+    nativeTouchStyle.textContent = '#rlog-badge-host.rlog-badge-host.rlog-floating-button[script_id="recent-request-log-badge"][role="button"]{touch-action:none!important}';
+    document.head.append(nativeTouchStyle);
     root.innerHTML += '<div class="rail closed" aria-hidden="true"></div><div class="list" role="group" aria-label="已收纳的悬浮球" hidden></div><button type="button" class="hub" aria-label="点击展开收纳；长按管理"></button><button type="button" class="empty" aria-label="添加悬浮球" title="添加悬浮球" hidden>+</button><div class="pick-note" hidden>点一下要收纳的悬浮球 <button type="button">取消</button></div>';
     document.body.append(host);
     const rail = root.querySelector('.rail');
@@ -97,7 +102,14 @@ export function installDock() {
             const slot = slots.get(key);
             if (!slot) continue;
             const moving = itemDrag?.key === key && itemDrag.active;
-            const rect = moving ? { left: itemDrag.x - SLOT_SIZE / 2, top: itemDrag.y - SLOT_SIZE / 2, width: SLOT_SIZE, height: SLOT_SIZE } : slot.getBoundingClientRect();
+            let rect = moving ? { left: itemDrag.x - SLOT_SIZE / 2, top: itemDrag.y - SLOT_SIZE / 2, width: SLOT_SIZE, height: SLOT_SIZE } : slot.getBoundingClientRect();
+            if (!moving && open && listRect.height < SLOT_SIZE && rect.bottom > listRect.top && rect.top < listRect.bottom) {
+                // A viewport shorter than one slot still shows the original
+                // control, scaled into its visible part of the scroll area.
+                const top = Math.max(rect.top, listRect.top);
+                const size = Math.min(rect.width, Math.min(rect.bottom, listRect.bottom) - top);
+                rect = { left: rect.left + (rect.width - size) / 2, top, width: size, height: size, bottom: top + size };
+            }
             const visible = moving || (open && rect.top >= listRect.top - 1 && rect.bottom <= listRect.bottom + 1);
             placeTarget(binding, rect, visible);
             paintGlow(binding.control, slot, visible && !moving);
@@ -117,12 +129,12 @@ export function installDock() {
         hub.dataset.edge = position.edge;
         rail.dataset.edge = position.edge;
         hub.setAttribute('aria-expanded', String(open));
-        Object.assign(rail.style, { left: `${Math.max(view.left, x - RAIL_PADDING)}px`, top: `${y - RAIL_PADDING}px`, width: `${HUB_SIZE + RAIL_PADDING * 2}px`, height: `${layout.columnHeight + RAIL_PADDING * 2}px` });
+        Object.assign(rail.style, { left: `${Math.max(view.left, x - RAIL_PADDING)}px`, top: `${view.top + layout.columnTop - RAIL_PADDING}px`, width: `${HUB_SIZE + RAIL_PADDING * 2}px`, height: `${layout.columnHeight + RAIL_PADDING * 2}px` });
         rail.classList.toggle('closed', !open);
         list.hidden = !open || !items.length;
-        Object.assign(list.style, { left: `${listX}px`, top: `${y + HUB_SIZE + SLOT_GAP}px`, height: `${layout.listHeight}px` });
+        Object.assign(list.style, { left: `${listX}px`, top: `${view.top + layout.listTop}px`, height: `${layout.listHeight}px` });
         empty.hidden = !open || items.length > 0;
-        Object.assign(empty.style, { left: `${listX}px`, top: `${Math.min(view.top + view.height - SLOT_SIZE - 6, y + HUB_SIZE + SLOT_GAP)}px` });
+        Object.assign(empty.style, { left: `${listX}px`, top: `${view.top + layout.listTop}px`, height: `${Math.min(SLOT_SIZE, layout.listHeight)}px` });
         scheduleAlign();
     }
     function release(key, point, pointer) {
@@ -138,6 +150,13 @@ export function installDock() {
         bindings.delete(key);
     }
     function bindItems() {
+        observer.disconnect();
+        observer.observe(document.body, { childList: true, subtree: true });
+        for (const item of items) {
+            if (item.fingerprint.elementId !== 'bbi-app-host') continue;
+            const shadow = document.getElementById(item.fingerprint.elementId)?.shadowRoot;
+            if (shadow) observer.observe(shadow, { childList: true, subtree: true });
+        }
         for (const item of items) {
             const old = bindings.get(item.key);
             if (old?.element.isConnected) continue;
@@ -145,7 +164,15 @@ export function installDock() {
             const element = findTarget(item.fingerprint);
             if (!element) continue;
             const binding = holdTarget(element);
-            binding.observer = new MutationObserver(scheduleAlign);
+            binding.observer = new MutationObserver(() => {
+                // Keep the original control's own position and visibility
+                // updates while the dock projects it elsewhere.
+                for (const key of binding.compatibility?.originalStyles || []) {
+                    if (element.style.getPropertyPriority(key) === 'important') continue;
+                    binding.prior.set(key, { value: element.style.getPropertyValue(key), priority: '' });
+                }
+                scheduleAlign();
+            });
             const attributes = { attributes: true, attributeFilter: ['style', 'class', 'aria-busy'] };
             if (binding.compatibility?.elementId === 'tw-jm-reader') attributes.attributeFilter.push('hidden');
             binding.observer.observe(element, attributes);
@@ -347,7 +374,13 @@ export function installDock() {
         externalDrag = null;
         if (!drag || drag.pointerId !== event.pointerId || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 12) return;
         const rect = hub.getBoundingClientRect();
-        if (event.clientX >= rect.left - 24 && event.clientX <= rect.right + 24 && event.clientY >= rect.top - 24 && event.clientY <= rect.bottom + 24) add(drag.target);
+        if (event.clientX >= rect.left - 24 && event.clientX <= rect.right + 24 && event.clientY >= rect.top - 24 && event.clientY <= rect.bottom + 24) {
+            if (dockCompatibility(drag.target)?.elementId === 'bbi-app-host') {
+                // Let its original pointerup finish edge snapping and Vue's
+                // style update before recording the position to restore.
+                requestAnimationFrame(() => { if (host.isConnected && drag.target.isConnected) add(drag.target); });
+            } else add(drag.target);
+        }
     };
     const onKey = event => { if (event.key === 'Escape') pick(false); };
     const cancelExternal = () => { externalDrag = null; };
@@ -394,6 +427,7 @@ export function installDock() {
         pick,
         reveal() { open = true; paint(); hub.focus({ preventScroll: true }); },
         destroy() {
+            nativeTouchStyle.remove();
             for (const name of pointerStarts) window.removeEventListener(name, onPointerStart, true);
             cleanupSync(); cleanupPress(); observer.disconnect();
             clearTimeout(rebindTimer); cancelAnimationFrame(layoutFrame);

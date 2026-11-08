@@ -3,21 +3,29 @@ import { getHost } from './host.js';
 export const NATIVE_DOCK_EVENT = Symbol('dock native drag');
 
 const targets = [
+    { selector: '#rlog-badge-host.rlog-badge-host.rlog-floating-button[script_id="recent-request-log-badge"][role="button"]', elementId: 'rlog-badge-host', nativeDrop: true, originalStyles: ['left', 'top', 'display'] },
     { selector: '#lachesis-ball-host .lx-ball', container: '#lachesis-ball-host', script: '拉刻西斯悬浮球', button: '拉刻西斯', coordinates: true },
     { selector: '#lx-player-host .lx-deck-launcher', container: '#lx-player-host', script: '拉刻西斯播放器', button: '播放器' },
     { selector: '.lx-cat-ball', nativeDrop: true },
 ];
 
 const jmReader = { elementId: 'tw-jm-reader', nativeDrop: true };
+const baiBaiImage = { elementId: 'bbi-app-host', selector: '.bbi-root[data-theme] > .bbi-orb[role="button"][aria-label="打开柏宝绘"]', nativeDrop: true, originalStyles: ['left', 'top', 'right', 'transform'] };
 
 export function dockCompatibility(element) {
     const root = element.getRootNode?.();
     // Only the reader's original orb is collected; its full-screen host and panel stay put.
     if (element.id === 'orb' && root?.host?.id === jmReader.elementId && root.host.shadowRoot === root) return jmReader;
+    if (root?.host?.id === baiBaiImage.elementId && root.host.shadowRoot === root && element.matches(baiBaiImage.selector)) return baiBaiImage;
     return targets.find(target => element.matches(target.selector));
 }
 
 export async function activateCompatibleTarget(element, compatibility) {
+    if (compatibility === baiBaiImage) {
+        const view = element.ownerDocument.defaultView;
+        element.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
+        return;
+    }
     if (!compatibility.button) { element.click(); return; }
     // Both scripts register the same panel action with Tavern Helper, including
     // the player whose button is not listed in its visible button settings.
@@ -40,6 +48,8 @@ function nativePointer(element, pointer) {
 }
 
 export function prepareCompatibleTarget(element, pointer) {
+    // This orb opens on a stationary pointerup, including pointercancel.
+    if (dockCompatibility(element) === baiBaiImage) return;
     const send = nativePointer(element, pointer);
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
@@ -51,6 +61,17 @@ export function prepareCompatibleTarget(element, pointer) {
 
 export function dropCompatibleTarget(element, point, pointer) {
     const send = nativePointer(element, pointer);
+    if (dockCompatibility(element) === baiBaiImage) {
+        // Its drag origin uses the untransformed layout position, even when
+        // the resting bookmark is translated halfway past the screen edge.
+        const x = element.offsetLeft + element.offsetWidth / 2;
+        const y = element.offsetTop + element.offsetHeight / 2;
+        send('pointerdown', x, y);
+        send('pointermove', x + 7, y);
+        send('pointermove', point.x, point.y);
+        send('pointerup', point.x, point.y);
+        return;
+    }
     // The catalog paints its own position again on every pointerup. Let its
     // existing drag handler own the drop position and persistence as well.
     send('pointercancel', 0, 0);

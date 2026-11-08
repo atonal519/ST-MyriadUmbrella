@@ -15,14 +15,22 @@ export function settleDock(point, width, height) {
 }
 
 export function layoutDock({ width, height, x, y, edge = '', open = false, count = 0 }) {
-    const visibleCount = Math.min(count, Math.max(1, Math.floor((height - HUB_SIZE - 28) / SLOT_STEP)));
-    const listHeight = count ? visibleCount * SLOT_STEP - SLOT_GAP : 0;
-    const columnHeight = HUB_SIZE + (open && count ? listHeight + SLOT_GAP : 0);
+    const top = clamp(y, 6, height - HUB_SIZE - 6);
+    const rows = Math.max(1, count);
+    const fullHeight = rows * SLOT_STEP - SLOT_GAP;
+    const below = height - 6 - top - HUB_SIZE - SLOT_GAP;
+    const above = top - SLOT_GAP - 6;
+    const direction = below >= fullHeight ? 'down' : above >= fullHeight || above > below ? 'up' : 'down';
+    const available = direction === 'up' ? above : below;
+    const visibleCount = Math.min(rows, Math.max(1, Math.floor((available + SLOT_GAP) / SLOT_STEP)));
+    const listHeight = Math.min(visibleCount * SLOT_STEP - SLOT_GAP, Math.max(0, available));
+    const listTop = direction === 'up' ? top - SLOT_GAP - listHeight : top + HUB_SIZE + SLOT_GAP;
+    const columnTop = open && direction === 'up' ? listTop : top;
+    const columnHeight = HUB_SIZE + (open ? listHeight + SLOT_GAP : 0);
     let left = clamp(x, 6, width - HUB_SIZE - 6);
     if (edge === 'left') left = open ? RAIL_PADDING : EDGE_REVEAL - HUB_SIZE;
     if (edge === 'right') left = open ? width - HUB_SIZE - RAIL_PADDING : width - EDGE_REVEAL;
-    const top = clamp(y, 6, height - columnHeight - 6);
     const hub = { x: left, y: top, size: HUB_SIZE };
-    const slots = open ? Array.from({ length: count }, (_, index) => ({ x: left + (HUB_SIZE - SLOT_SIZE) / 2, y: top + HUB_SIZE + SLOT_GAP + index * SLOT_STEP, size: SLOT_SIZE })) : [];
-    return { hub, slots, listHeight, columnHeight, visibleCount };
+    const slots = open ? Array.from({ length: count }, (_, index) => ({ x: left + (HUB_SIZE - SLOT_SIZE) / 2, y: listTop + index * SLOT_STEP, size: SLOT_SIZE })) : [];
+    return { hub, slots, listHeight, listTop, columnTop, columnHeight, visibleCount, direction };
 }

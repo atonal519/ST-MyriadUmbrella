@@ -1,3 +1,4 @@
+import { createHomeWindow, bindOutsideClose } from './home-window.js';
 import { shadowHost } from './ui.js';
 import { homeCss } from './home-style.js';
 import { mountLibrary } from './library.js';
@@ -11,8 +12,12 @@ export function installHome(actions) {
     let host = null;
     let dialog = null;
     let library = null;
+    let disposeWindow = null;
+    let unbindOutsideClose = null;
 
     function close() {
+        disposeWindow?.(); disposeWindow = null;
+        unbindOutsideClose?.(); unbindOutsideClose = null;
         dialog?.close(); library?.destroy(); library = null;
         host?.remove(); host = null; dialog = null;
     }
@@ -49,6 +54,8 @@ export function installHome(actions) {
         root.querySelector('[data-close]').addEventListener('click', close);
         root.addEventListener('keydown', event => event.stopPropagation());
         dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+        disposeWindow = createHomeWindow(dialog);
+        unbindOutsideClose = bindOutsideClose({ target: dialog, panel: dialog, nativeDialog: true, close });
         dialog.showModal();
         // Opening the album should not summon the mobile keyboard.
         root.querySelector('[data-close]').focus({ preventScroll: true });

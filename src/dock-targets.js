@@ -32,6 +32,7 @@ export function actionTarget(element) {
 
 export function findTarget(value, documentRef = document) {
     if (value.elementId === 'tw-jm-reader') return documentRef.getElementById(value.elementId)?.shadowRoot?.getElementById('orb') || null;
+    if (value.elementId === 'bbi-app-host') return documentRef.getElementById(value.elementId)?.shadowRoot?.querySelector('.bbi-root[data-theme] > .bbi-orb[role="button"][aria-label="打开柏宝绘"]') || null;
     if (value.elementId) return documentRef.getElementById(value.elementId);
     const selector = value.scriptId
         ? `[script_id="${CSS.escape(value.scriptId)}"]${value.classSelector || ''}`
@@ -46,7 +47,7 @@ export function floatingTarget(event) {
     if (path.some(element => element?.id?.startsWith('st-tools-'))) return null;
     for (const element of path) {
         if (!(element instanceof Element) || element.closest(excluded)) continue;
-        if (dockCompatibility(element)?.elementId === 'tw-jm-reader') return element;
+        if (dockCompatibility(element)?.elementId) return element;
         // A shadow visual is not addressable by the document fingerprint.
         // Own its outer floating host, which also retains the plugin handlers.
         if (element.getRootNode() !== document) continue;
@@ -72,7 +73,27 @@ export function holdTarget(element) {
     const containerZ = container ? { element: container, value: container.style.getPropertyValue('z-index'), priority: container.style.getPropertyPriority('z-index') } : null;
     if (compatibility) prior.set('display', { value: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display') });
     if (container) set(container, 'z-index', String(DOCK_Z_INDEX + 1));
-    return { element, control, prior, innerOpacity, compatibility, containerZ, width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
+    let collectedStyle = null;
+    const collectedBorder = `${SLOT_SIZE / BALL_SIZE}px solid color-mix(in srgb,var(--st-tools-ink,var(--SmartThemeBodyColor,currentColor)) 48%,transparent)`;
+    if (compatibility?.elementId === 'bbi-app-host') {
+        // Keep Vue's own dimensions and icon styles intact beneath this
+        // temporary square, so the original shape returns on release.
+        collectedStyle = element.ownerDocument.createElement('style');
+        collectedStyle.textContent = `
+            .bbi-root[data-theme] > .bbi-orb{width:${SLOT_SIZE}px!important;height:${SLOT_SIZE}px!important;box-sizing:border-box!important;border:${collectedBorder}!important;border-radius:50%!important;overflow:hidden!important}
+            .bbi-root[data-theme] > .bbi-orb > .bbi-orb-icon{margin-bottom:0!important}
+        `;
+        element.getRootNode().append(collectedStyle);
+    } else if (compatibility?.elementId === 'rlog-badge-host') {
+        collectedStyle = element.ownerDocument.createElement('style');
+        collectedStyle.textContent = `
+            :host{width:${SLOT_SIZE}px!important;height:${SLOT_SIZE}px!important}
+            .rlog-badge-visual{color:var(--st-tools-ink,var(--SmartThemeBodyColor,currentColor))!important}
+            .rlog-badge-visual::before{background:transparent!important;border:${collectedBorder}!important;transform:none!important}
+        `;
+        element.shadowRoot.append(collectedStyle);
+    }
+    return { element, control, prior, innerOpacity, compatibility, containerZ, collectedStyle, width: collectedStyle ? SLOT_SIZE : Math.max(1, rect.width), height: collectedStyle ? SLOT_SIZE : Math.max(1, rect.height) };
 }
 
 function set(element, key, value) {
@@ -117,6 +138,7 @@ export function placeTarget(binding, rect, show) {
 }
 
 export function releaseTarget(binding, point) {
+    binding.collectedStyle?.remove();
     for (const [key, old] of binding.prior) {
         restore(binding.element, key, old);
     }
