@@ -22,6 +22,23 @@ export function shadowHost(id, css = '') {
     return { host, root };
 }
 
+// 原生模态窗保持顶层与焦点行为，几何随键盘和缩放后的可视区域更新。
+export function bindDialogViewport(dialog) {
+    const win = dialog.ownerDocument.defaultView, visual = win.visualViewport;
+    const sync = () => {
+        const width = visual?.width || win.innerWidth, height = visual?.height || win.innerHeight;
+        Object.assign(dialog.style, {
+            left: `${(visual?.offsetLeft || 0) + width / 2}px`, top: `${(visual?.offsetTop || 0) + height / 2}px`,
+            right: 'auto', bottom: 'auto', margin: '0', transform: 'translate(-50%, -50%)',
+            width: `${Math.max(0, Math.min(540, width - 28))}px`, maxHeight: `${Math.max(0, height - 30)}px`,
+        });
+    };
+    const listeners = [[win, 'resize'], [win, 'scroll'], [win, 'orientationchange'], [visual, 'resize'], [visual, 'scroll']];
+    for (const [target, type] of listeners) target?.addEventListener(type, sync);
+    sync();
+    return () => { for (const [target, type] of listeners) target?.removeEventListener(type, sync); };
+}
+
 export function editDialog(text) {
     const { host, root } = shadowHost('st-tools-editor');
     const dialog = document.createElement('dialog');
@@ -38,7 +55,8 @@ export function editDialog(text) {
         let result = null;
         dialog.querySelector('[data-save]').addEventListener('click', () => { result = input.value; dialog.close(); });
         dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
-        dialog.addEventListener('close', () => { host.remove(); resolve(result); }, { once: true });
+        const disposeViewport = bindDialogViewport(dialog);
+        dialog.addEventListener('close', () => { disposeViewport(); host.remove(); resolve(result); }, { once: true });
         dialog.showModal();
         input.focus({ preventScroll: true });
     });

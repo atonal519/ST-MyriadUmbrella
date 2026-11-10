@@ -1,20 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+import { createHomeWindow } from '../src/home-window.js';
 import * as layout from '../src/home-window.js';
 const rect = (left, top, width, height) => ({ left, top, width, height });
-const fixture = nodes => ({ getElementById: id => nodes[id] && { getBoundingClientRect: () => nodes[id] } });
 
-test('main window uses the visible part of chat including visual viewport offsets', () => {
-  assert.equal(typeof layout.readChatBounds, 'function', 'main-window chat geometry is available');
-  const doc = fixture({ chat: rect(100, 70, 900, 650), sheld: rect(0, 0, 1200, 900) });
-  assert.deepEqual(layout.readChatBounds(doc, { innerWidth: 1200, innerHeight: 900, visualViewport: { offsetLeft: 150, offsetTop: 180, width: 700, height: 420 } }), rect(150, 180, 700, 420));
+test('main window reads the complete visual viewport including offsets', () => {
+  const win = { innerWidth: 1200, innerHeight: 900, visualViewport: { offsetLeft: 50, offsetTop: 80, width: 900, height: 700 } };
+  assert.deepEqual(layout.readPanelViewport(win), rect(50, 80, 900, 700));
 });
 
-test('missing or hidden chat falls back to sheld above the composer and finally the viewport', () => {
-  const doc = fixture({ chat: rect(0, 0, 0, 0), sheld: rect(120, 50, 700, 760), form_sheld: rect(120, 660, 700, 100), send_form: rect(120, 690, 700, 70) });
-  assert.deepEqual(layout.readChatBounds(doc, { innerWidth: 1000, innerHeight: 800 }), rect(120, 50, 700, 610));
-  assert.deepEqual(layout.readChatBounds(fixture({ chat: rect(0, 1000, 400, 300) }), { innerWidth: 390, innerHeight: 300 }), rect(0, 0, 390, 300));
+test('main window uses the browser viewport when visualViewport is unavailable', () => {
+  assert.deepEqual(layout.readPanelViewport({ innerWidth: 390, innerHeight: 844 }), rect(0, 0, 390, 844));
 });
 
 class Target {
@@ -48,17 +46,122 @@ test('native dialog backdrop uses coordinates so dialog padding remains internal
   click(5, 5); assert.equal(closes, 1);
 });
 
-test('home window observes chat and updates CSS bounds through viewport events', () => {
-  const listeners = new Map(), style = { setProperty(key, value) { this[key] = value; } };
-  let callback, disconnected = false;
-  const node = { getBoundingClientRect: () => rect(100, 80, 500, 650) };
-  const win = { innerWidth: 1200, innerHeight: 900, addEventListener(type, fn) { listeners.set(type, fn); }, removeEventListener(type) { listeners.delete(type); },
-    ResizeObserver: class { constructor(fn) { callback = fn; } observe() {} disconnect() { disconnected = true; } } };
-  const panel = new Target(); panel.style = style; panel.ownerDocument = { defaultView: win, getElementById: id => id === 'chat' ? node : null };
-  const dispose = layout.createHomeWindow(panel);
-  assert.equal(style['--tt-window-left'], '100px'); assert.equal(style['--tt-window-height'], '650px');
-  win.visualViewport = { offsetLeft: 150, offsetTop: 180, width: 300, height: 200 }; callback();
-  assert.equal(style['--tt-window-left'], '150px'); assert.equal(style['--tt-window-top'], '180px');
-  assert.equal(style['--tt-window-height'], '200px');
-  dispose(); assert.equal(disconnected, true); assert.equal(listeners.size, 0);
+
+test('foreign fixed shadow window remains interactive while ordinary host clicks dismiss', () => {
+  const target = new Target(), ownHost = {}, foreignHost = {}, foreignRoot = { nodeType: 11, host: foreignHost };
+  const panel = { getRootNode: () => ({ host: ownHost }), ownerDocument: { defaultView: { getComputedStyle: () => ({ position: 'fixed' }) } } };
+  let closes = 0; layout.bindOutsideClose({ target, panel, close: () => closes++ });
+  for (const type of ['pointerdown', 'pointerup', 'click']) target.emit(type, { composedPath: () => [foreignRoot, foreignHost, target] });
+  assert.equal(closes, 0);
+  for (const type of ['pointerdown', 'pointerup', 'click']) target.emit(type);
+  assert.equal(closes, 1);
+});
+function fixture(width = 1200, height = 900, withVisual = false) {
+  const target = () => {
+    const listeners = new Map();
+    return { listeners, addEventListener: (type, handler) => listeners.set(type, handler), removeEventListener: type => listeners.delete(type), fire: (type, event = {}) => listeners.get(type)?.(event) };
+  };
+  const observed = [], resizeObservers = [], visual = target();
+  let chat = { left: 400, top: 200, width: 400, height: 400 };
+  const win = { ...target(), innerWidth: width, innerHeight: height,
+    ResizeObserver: class { constructor(callback) { resizeObservers.push(callback); } observe(node) { observed.push(node); } disconnect() {} } };
+  if (withVisual) win.visualViewport = Object.assign(visual, { offsetLeft: 0, offsetTop: 0, width, height });
+  win.matchMedia = () => ({ get matches() { return win.innerWidth >= 641; } });
+  const style = { setProperty(key, value) { this[key] = value; }, removeProperty(key) { delete this[key]; } };
+  const host = { style: {}, getBoundingClientRect: () => ({ left: Number.parseFloat(host.style.left) || 0, top: Number.parseFloat(host.style.top) || 0 }) };
+  const captures = new Set(), surface = { ...target(), ownerDocument: { defaultView: win, getElementById: id => id === 'chat' ? { getBoundingClientRect: () => chat } : null }, style,
+    getRootNode: () => ({ host }), classList: { add() {}, remove() {} }, setPointerCapture: id => captures.add(id), hasPointerCapture: id => captures.has(id), releasePointerCapture: id => captures.delete(id),
+    getBoundingClientRect: () => Object.fromEntries(['left', 'top', 'width', 'height'].map(key => [key, Number.parseFloat(style[key]) || 0])) };
+  const controls = { dispose: createHomeWindow(surface), refresh: () => win.fire('resize'), stop: () => surface.fire('pointercancel', {pointerId:1}) };
+  controls.refresh();
+  return { surface, host, controls, style, win, visual, observed, resizeObservers, setChat: value => { chat = value; } };
+}
+
+test('desktop home defaults to 360×600 and ignores chat/input size changes', () => {
+  const f = fixture(1200, 700);
+  assert.deepEqual(f.surface.getBoundingClientRect(), { left: 820, top: 70, width: 360, height: 600 });
+  f.setChat({ left: 500, top: 300, width: 100, height: 50 });
+  for (const callback of f.resizeObservers) callback();
+  f.controls.refresh();
+  assert.deepEqual(f.surface.getBoundingClientRect(), { left: 820, top: 70, width: 360, height: 600 });
+  assert.equal(f.observed.length, 0);
+  f.controls.dispose();
+  assert.equal(f.win.listeners.size, 0);
+  assert.equal(f.surface.listeners.size, 0);
+});
+
+test('desktop home drags across all chat edges and restores its preferred position after a smaller viewport', () => {
+  const f = fixture();
+  const target = { closest: selector => selector === '.home-header' ? {} : null };
+  for (const [x, y, left, top] of [[-2000, 0, 10, 70], [4000, 0, 830, 70], [0, -2000, 830, 10], [0, 4000, 830, 290]]) {
+    f.surface.fire('pointerdown', { pointerId: 1, button: 0, clientX: 0, clientY: 0, target, preventDefault() {}, stopPropagation() {} });
+    f.surface.fire('pointermove', { pointerId: 1, clientX: x, clientY: y });
+    f.surface.fire('pointerup', { pointerId: 1, type: 'pointerup' });
+    assert.deepEqual(f.surface.getBoundingClientRect(), { left, top, width: 360, height: 600 });
+    f.controls.stop(); f.controls.refresh();
+    assert.equal(f.style.left, `${left}px`); assert.equal(f.style.top, `${top}px`);
+  }
+  f.win.innerWidth = 700; f.win.innerHeight = 400; f.win.fire('resize');
+  assert.deepEqual(f.surface.getBoundingClientRect(), { left: 330, top: 10, width: 360, height: 380 });
+  f.win.innerWidth = 1200; f.win.innerHeight = 900; f.win.fire('resize');
+  assert.deepEqual(f.surface.getBoundingClientRect(), { left: 830, top: 290, width: 360, height: 600 });
+  f.controls.dispose();
+});
+
+test('390 and 320 mobile home bounds follow the visual viewport and use QQJ mobile safe-area margins', () => {
+  const css = readFileSync(new URL('../src/home-style.js', import.meta.url), 'utf8');
+  assert.match(css, /max\(40px,env\(safe-area-inset-top,0px\)\)/);
+  assert.match(css, /max\(40px,env\(safe-area-inset-bottom,0px\)\)/);
+  for (const width of [390, 320]) {
+    const f = fixture(width, 844, true);
+    assert.equal(f.style['--tt-window-width'], `${width}px`);
+    assert.equal(f.style['--tt-window-height'], '844px');
+    assert.equal(f.style.width, undefined);
+    f.setChat({ left: 100, top: 300, width: 100, height: 50 });
+    f.controls.refresh();
+    assert.equal(f.style['--tt-window-height'], '844px');
+    assert.equal(f.observed.length, 0);
+    f.win.visualViewport = Object.assign(f.visual, { offsetLeft: 10, offsetTop: 30, width: width - 20, height: 420 });
+    f.visual.fire('resize');
+    assert.equal(f.host.style.top, '30px');
+    assert.equal(f.style['--tt-window-height'], '420px');
+    f.controls.dispose();
+  }
+});
+
+
+test('native modal geometry follows the visible keyboard area and disposes listeners', async () => {
+  const { bindDialogViewport } = await import('../src/ui.js');
+  const events = () => { const listeners = new Map(); return { listeners, addEventListener(type, fn) { listeners.set(type, fn); }, removeEventListener(type) { listeners.delete(type); } }; };
+  const visual = { ...events(), width: 360, height: 240, offsetLeft: 15, offsetTop: 80 };
+  const win = { ...events(), innerWidth: 390, innerHeight: 844, visualViewport: visual };
+  const dialog = { ownerDocument: { defaultView: win }, style: {} };
+  const dispose = bindDialogViewport(dialog);
+  assert.equal(dialog.style.left, '195px');
+  assert.equal(dialog.style.top, '200px');
+  assert.equal(dialog.style.width, '332px');
+  assert.equal(dialog.style.maxHeight, '210px');
+  visual.height = 190; visual.offsetTop = 120; visual.listeners.get('scroll')();
+  assert.equal(dialog.style.top, '215px');
+  assert.equal(dialog.style.maxHeight, '160px');
+  dispose();
+  assert.equal(visual.listeners.size, 0);
+  assert.equal(win.listeners.size, 0);
+});
+
+
+test('touch drag preserves the complete search label and accepts adjusted header whitespace', () => {
+  const f = fixture();
+  const label = { getBoundingClientRect: () => ({ left: 100, right: 300, top: 100, bottom: 140 }) };
+  const target = { closest: selector => selector === '.home-header' ? {} : label };
+  const down = y => f.surface.fire('pointerdown', { pointerId: 1, button: 0, pointerType: 'touch', clientX: 150, clientY: y, target, preventDefault() {}, stopPropagation() {} });
+  down(110);
+  f.surface.fire('pointermove', { pointerId: 1, clientX: 200, clientY: 180 });
+  assert.equal(f.style.left, '820px');
+  down(90);
+  f.surface.fire('pointermove', { pointerId: 1, clientX: 200, clientY: 180 });
+  assert.equal(f.style.left, '830px');
+  assert.equal(f.style.top, '160px');
+  f.surface.fire('pointercancel', { pointerId: 1 });
+  f.controls.dispose();
 });

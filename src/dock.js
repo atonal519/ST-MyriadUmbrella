@@ -4,7 +4,7 @@ import { activateCompatibleTarget, dockCompatibility, dropCompatibleTarget, prep
 import { readConfig, writeConfig } from './config.js';
 import { notify } from './host.js';
 import { bindPressActions } from './press.js';
-import { icons, shadowHost } from './ui.js';
+import { icons, shadowHost, bindDialogViewport } from './ui.js';
 import { installSyncStatus } from './sync-status.js';
 
 const POSITION_KEY = 'st-tavern-tools-position';
@@ -292,6 +292,7 @@ export function installDock() {
             row.append(label, button); rows.append(row);
         }
     }
+    let disposeManagerViewport = null;
     function showManager() {
         if (manager) { manager.focus(); return; }
         manager = document.createElement('dialog');
@@ -300,7 +301,8 @@ export function installDock() {
         renderManager();
         manager.querySelector('[data-pick]').addEventListener('click', () => { manager.close(); pick(); });
         manager.querySelector('[data-close]').addEventListener('click', () => manager.close());
-        manager.addEventListener('close', () => { manager.remove(); manager = null; }, { once: true });
+        disposeManagerViewport = bindDialogViewport(manager);
+        manager.addEventListener('close', () => { disposeManagerViewport?.(); disposeManagerViewport = null; manager.remove(); manager = null; }, { once: true });
         manager.showModal();
     }
 
@@ -427,6 +429,8 @@ export function installDock() {
         pick,
         reveal() { open = true; paint(); hub.focus({ preventScroll: true }); },
         destroy() {
+            disposeManagerViewport?.(); disposeManagerViewport = null;
+            manager?.close();
             nativeTouchStyle.remove();
             for (const name of pointerStarts) window.removeEventListener(name, onPointerStart, true);
             cleanupSync(); cleanupPress(); observer.disconnect();

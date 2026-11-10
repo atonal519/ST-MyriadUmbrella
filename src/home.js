@@ -14,10 +14,12 @@ export function installHome(actions) {
     let library = null;
     let disposeWindow = null;
     let unbindOutsideClose = null;
+    let unbindEscape = null;
 
     function close() {
         disposeWindow?.(); disposeWindow = null;
         unbindOutsideClose?.(); unbindOutsideClose = null;
+        unbindEscape?.(); unbindEscape = null;
         dialog?.close(); library?.destroy(); library = null;
         host?.remove(); host = null; dialog = null;
     }
@@ -55,8 +57,18 @@ export function installHome(actions) {
         root.addEventListener('keydown', event => event.stopPropagation());
         dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
         disposeWindow = createHomeWindow(dialog);
-        unbindOutsideClose = bindOutsideClose({ target: dialog, panel: dialog, nativeDialog: true, close });
-        dialog.showModal();
+        unbindOutsideClose = bindOutsideClose({ target: document, panel: dialog, close, canClose: () => innerWidth <= 640 && !document.querySelector('#st-tools-editor') });
+        const escape = event => {
+            if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+            const foreignWindow = event.composedPath().some(node => node?.matches?.('dialog:modal')
+                || (node?.nodeType === 11 && node.host !== host && getComputedStyle(node.host).position === 'fixed'));
+            if (foreignWindow) return;
+            event.preventDefault(); close();
+        };
+        root.addEventListener('keydown', escape);
+        document.addEventListener('keydown', escape);
+        unbindEscape = () => document.removeEventListener('keydown', escape);
+        dialog.show();
         // Opening the album should not summon the mobile keyboard.
         root.querySelector('[data-close]').focus({ preventScroll: true });
     }
