@@ -3,9 +3,9 @@
   "loading_order": 200,
   "requires": [],
   "optional": [],
-  "js": "src/runtime.bundle.js?v=20261110.window-5428ece52bdd8e0d",
+  "js": "src/runtime.bundle.js?v=20261111.window-a9568c03e2ea35bc",
   "author": "Atonal",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "auto_update": false,
   "hooks": { "disable": "disable" }
 }
