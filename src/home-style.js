@@ -1,7 +1,7 @@
 import { albumCss } from './album-style.js';
 
 export const homeCss = `
-    :host{position:fixed;left:0;top:0;width:100dvw;height:100dvh;z-index:4000;pointer-events:auto;--tt-surface:var(--st-home-surface,#faf9f6);--tt-ink:var(--st-home-ink,#282927);--tt-border:color-mix(in srgb,var(--tt-ink) 15%,var(--tt-surface));--tt-muted:color-mix(in srgb,var(--tt-ink) 58%,var(--tt-surface));font:13px/1.5 var(--mainFontFamily,system-ui,sans-serif);color:var(--tt-ink);letter-spacing:normal;text-shadow:none;isolation:isolate}
+    :host{position:fixed;left:0;top:0;width:100dvw;height:100dvh;z-index:4000;pointer-events:none;--tt-surface:var(--st-home-surface,#faf9f6);--tt-ink:var(--st-home-ink,#282927);--tt-border:color-mix(in srgb,var(--tt-ink) 15%,var(--tt-surface));--tt-muted:color-mix(in srgb,var(--tt-ink) 58%,var(--tt-surface));font:13px/1.5 var(--mainFontFamily,system-ui,sans-serif);color:var(--tt-ink);letter-spacing:normal;text-shadow:none;isolation:isolate}
     .home{position:absolute;inset:auto;left:auto;right:20px;top:70px;transform:none;pointer-events:auto;width:360px;height:600px;max-width:calc(100dvw - 20px);max-height:calc(100dvh - 20px);margin:0;padding:0;border:1px solid var(--tt-border);border-radius:14px;overflow:hidden;background:var(--tt-surface);color:var(--tt-ink)}
     .shell{height:100%;display:flex;flex-direction:column;background:var(--tt-surface)}
     .home-header{display:flex;align-items:center;justify-content:space-between;flex:0 0 auto;padding:12px 14px 8px;gap:8px}

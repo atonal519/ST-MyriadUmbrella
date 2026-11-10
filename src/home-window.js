@@ -5,6 +5,17 @@ export function readPanelViewport(win = globalThis.window) {
     width: Math.max(0, Number(visual?.width) || win.innerWidth), height: Math.max(0, Number(visual?.height) || win.innerHeight) };
 }
 
+export function isForeignWindow(event, panel) {
+  const path = event.composedPath?.();
+  if (path?.includes(panel)) return false;
+  const host = panel.getRootNode?.().host;
+  return path?.some(node => node?.matches?.('button,input,textarea,select,a[href],label,summary,[contenteditable]:not([contenteditable="false"]),[tabindex]:not([tabindex="-1"]),[role~="button"],[role~="link"],[role~="checkbox"],[role~="radio"],[role~="switch"],[role~="textbox"],dialog,[role~="dialog"],[role~="alertdialog"],[role~="menu"],[role~="listbox"],[role~="combobox"]')
+    || ['true', 'menu', 'listbox', 'tree', 'grid', 'dialog'].includes(node?.getAttribute?.('aria-haspopup'))
+    || typeof node?.popover === 'string' && node.matches?.(':popover-open')
+    || node?.nodeType === 11 && node.host !== host
+    && panel.ownerDocument?.defaultView?.getComputedStyle?.(node.host)?.position === 'fixed');
+}
+
 // down/up 两端均在外侧才关闭，拖选、滚动、取消的手势不转换成关闭。
 export function bindOutsideClose({ target, panel, close, canClose = () => true, nativeDialog = false }) {
   let gesture = null;
@@ -15,10 +26,7 @@ export function bindOutsideClose({ target, panel, close, canClose = () => true, 
       return event.clientX < rect.left || event.clientX > rect.left + rect.width || event.clientY < rect.top || event.clientY > rect.top + rect.height;
     }
     const path = event.composedPath?.();
-    const host = panel.getRootNode?.().host;
-    const foreignWindow = path?.some(node => node?.nodeType === 11 && node.host !== host
-      && panel.ownerDocument?.defaultView?.getComputedStyle?.(node.host)?.position === 'fixed');
-    return !foreignWindow && !(path?.includes(panel) ?? panel.contains(event.target));
+    return !isForeignWindow(event, panel) && !(path?.includes(panel) ?? panel.contains(event.target));
   };
   const down = event => {
     gesture = event.button === 0 && event.isPrimary !== false && outside(event) && canClose()

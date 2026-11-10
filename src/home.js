@@ -1,4 +1,4 @@
-import { createHomeWindow, bindOutsideClose } from './home-window.js';
+import { createHomeWindow, bindOutsideClose, isForeignWindow } from './home-window.js';
 import { shadowHost } from './ui.js';
 import { homeCss } from './home-style.js';
 import { mountLibrary } from './library.js';
@@ -60,9 +60,7 @@ export function installHome(actions) {
         unbindOutsideClose = bindOutsideClose({ target: document, panel: dialog, close, canClose: () => innerWidth <= 640 && !document.querySelector('#st-tools-editor') });
         const escape = event => {
             if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
-            const foreignWindow = event.composedPath().some(node => node?.matches?.('dialog:modal')
-                || (node?.nodeType === 11 && node.host !== host && getComputedStyle(node.host).position === 'fixed'));
-            if (foreignWindow) return;
+            if (isForeignWindow(event, dialog)) return;
             event.preventDefault(); close();
         };
         root.addEventListener('keydown', escape);

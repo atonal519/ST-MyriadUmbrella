@@ -2,7 +2,7 @@
 
 Android **0.2.5** 已正式发布：[下载安装包](https://github.com/atonal519/ST-MyriadUmbrella/releases/download/apk-v0.2.5/qianjisan-0.2.5.apk) · [源码与构建说明](android/README.md)。已有 0.1.6 及以上试用版可在 App 首页右上角检查更新，按系统提示覆盖安装。APK 与下方酒馆扩展分别更新。
 
-前端插件当前为 **0.1.3**，适用于原生 SillyTavern 与 Luker，无后端插件或额外依赖。
+前端插件当前为 **0.1.4**，适用于原生 SillyTavern 与 Luker，无后端插件或额外依赖。
 
 在酒馆的“扩展 → 安装扩展”中填入仓库地址，安装后刷新页面：
 
@@ -42,6 +42,10 @@ https://github.com/atonal519/ST-MyriadUmbrella
 开发验证：在酒馆安装目录的 `public/scripts/extensions/third-party/ST-MyriadUmbrella` 中运行 `npm test`，无需安装依赖。测试包含实际宿主 EventEmitter；可通过 `ST_UPSTREAM_REFERENCE=/path/to/SillyTavern npm test` 额外核对原生宿主参考代码。
 
 另已在 Chromium 隔离页加载原生 SillyTavern / Luker 的实际 HTML、CSS、千千结原悬浮球模块、完整最近请求插件及原生 Toastr，检查收纳显示、点击、拖入/拖出与恢复、局部编辑和通知交互。分类整理、原生“更多”菜单分发、实际 PromptManager 的开关处理与启用条目消费者也已覆盖。QR 使用内存测试接口，条目保存使用临时 HTTP 存储与宿主合并函数；隔离验证不等于实体手机或真实存档保存验收。
+
+## 0.1.4
+
+修复手机主页透明外壳和外侧捕获误拦宿主控件、其它弹窗及下拉的问题。Escape 由当前窗口处理，外来弹窗和菜单不再连带关闭主页。
 
 ## 0.1.3
 
