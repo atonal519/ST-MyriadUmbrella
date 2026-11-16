@@ -784,3 +784,25 @@ test('最近请求记录保留稳定宿主身份并激活原click入口，拖出
     assert.equal(opens, 1);
     assert.equal(dockCompatibility({ ...element, matches: () => false }), undefined);
 });
+
+test('已核两三事和千千结原Shadow按钮按36px收纳盒定位，释放移除样式', async () => {
+    const { holdTarget, placeTarget, releaseTarget } = await import(`${path}dock-targets.js`);
+    for (const id of ['tmt-fab-host', 'tmt-card-fab-host', 'qqj-fab-host']) {
+        const values = new Map([['left', ['12px', '']], ['top', ['20px', '']]]);
+        const root = { querySelector: () => button, append(style) { style.isConnected = true; } };
+        const button = { matches: value => value === 'button[aria-busy]', style: { getPropertyValue: () => '', getPropertyPriority: () => '', setProperty() {}, removeProperty() {} } };
+        const element = { id, shadowRoot: root, matches: () => false,
+            getBoundingClientRect: () => ({ width: 39, height: 39 }),
+            ownerDocument: { createElement: () => ({ isConnected: false, remove() { this.isConnected = false; } }) },
+            style: { getPropertyValue: key => values.get(key)?.[0] || '', getPropertyPriority: key => values.get(key)?.[1] || '', setProperty: (key,value,priority='') => values.set(key,[value,priority]), removeProperty: key => values.delete(key) },
+        };
+        const held = holdTarget(element);
+        assert.equal(held.control, button);
+        assert.equal(held.width, 36); assert.equal(held.height, 36);
+        placeTarget(held, { left: 100, top: 200, width: 36, height: 36 }, true);
+        assert.equal(values.get('left')[0], '102px'); assert.equal(values.get('top')[0], '202px');
+        assert.equal(held.collectedStyle.isConnected, true);
+        releaseTarget(held); assert.equal(held.collectedStyle.isConnected, false);
+        assert.deepEqual(values.get('left'), ['12px', '']); assert.deepEqual(values.get('top'), ['20px', '']);
+    }
+});

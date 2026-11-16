@@ -63,6 +63,61 @@ export function floatingTarget(event) {
 
 const owned = ['position', 'left', 'top', 'right', 'bottom', 'z-index', 'transform', 'transform-origin', 'scale', 'clip-path', 'opacity', 'visibility', 'pointer-events', 'transition'];
 
+
+function collectAppearance(element, control, compatibility) {
+    const ink = 'var(--st-tools-ink,var(--SmartThemeBodyColor,currentColor))';
+    const border = `${SLOT_SIZE / BALL_SIZE}px solid color-mix(in srgb,${ink} 48%,transparent)`;
+    const iconSize = 18 * SLOT_SIZE / BALL_SIZE;
+    const hostBox = `width:${SLOT_SIZE}px!important;height:${SLOT_SIZE}px!important;box-sizing:border-box!important;`;
+    const frame = `${hostBox}padding:0!important;border:${border}!important;border-radius:50%!important;background:transparent!important;box-shadow:none!important;transform:none!important;`;
+    const center = 'display:grid!important;place-items:center!important;';
+    const iconBox = `width:${iconSize}px!important;height:${iconSize}px!important;display:block!important;margin:0!important;`;
+    let root = null;
+    let rules = '';
+    if (compatibility?.elementId === 'bbi-app-host') {
+        root = element.getRootNode();
+        rules = `
+            .bbi-root[data-theme] > .bbi-orb{${frame}${center}filter:none!important;overflow:hidden!important;color:${ink}!important}
+            .bbi-root[data-theme] > .bbi-orb > .bbi-orb-icon{${iconBox}}
+            .bbi-root[data-theme] > .bbi-orb > .bbi-orb-img{${iconBox}object-fit:contain!important}
+        `;
+    } else if (compatibility?.elementId === 'rlog-badge-host') {
+        root = element.shadowRoot;
+        rules = `
+            :host{${hostBox}}
+            .rlog-badge-visual{${center}color:${ink}!important}
+            .rlog-badge-visual::before{${frame}}
+            .rlog-badge-visual > i{${iconBox}${center}font-size:${iconSize}px!important;line-height:1!important}
+        `;
+    } else if (['tmt-fab-host', 'tmt-card-fab-host', 'qqj-fab-host'].includes(element.id) && element.shadowRoot?.querySelector('button[aria-busy]') === control) {
+        root = element.shadowRoot;
+        rules = `
+            :host{${hostBox}}
+            button[aria-busy]{${frame}${center}}
+            button[aria-busy]:not([aria-busy="true"]):not(.busy){color:${ink}!important}
+            button[aria-busy] > svg{${iconBox}}
+        `;
+    } else if (element.id === 'sp-fab' && (element.shadowRoot?.querySelector('.sp-fab-btn') === control || control.matches('#sp-fab > .sp-fab-btn'))) {
+        root = element.shadowRoot || element.ownerDocument.head;
+        const host = element.shadowRoot ? ':host' : '#sp-fab';
+        const button = element.shadowRoot ? '.sp-fab-btn' : '#sp-fab > .sp-fab-btn';
+        // The native Shadow button resets inherited pointer-events with all:initial.
+        // While collected, the slot must own both the visual and its icon's hit area.
+        rules = `
+            ${host}{${hostBox}}
+            ${button}{${frame}${center}}
+            ${button},${button} *{pointer-events:none!important}
+            ${button}:not(.sp-fab-busy):not(.sp-btn-generating):not(.sp-btn-done):not([aria-busy="true"]){color:${ink}!important}
+            ${button} > svg.sp-pen-icon{${iconBox}}
+        `;
+    }
+    if (!root) return null;
+    const style = element.ownerDocument.createElement('style');
+    style.textContent = rules;
+    root.append(style);
+    return style;
+}
+
 export function holdTarget(element) {
     const rect = element.getBoundingClientRect();
     const prior = new Map(owned.map(key => [key, { value: element.style.getPropertyValue(key), priority: element.style.getPropertyPriority(key) }]));
@@ -73,26 +128,7 @@ export function holdTarget(element) {
     const containerZ = container ? { element: container, value: container.style.getPropertyValue('z-index'), priority: container.style.getPropertyPriority('z-index') } : null;
     if (compatibility) prior.set('display', { value: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display') });
     if (container) set(container, 'z-index', String(DOCK_Z_INDEX + 1));
-    let collectedStyle = null;
-    const collectedBorder = `${SLOT_SIZE / BALL_SIZE}px solid color-mix(in srgb,var(--st-tools-ink,var(--SmartThemeBodyColor,currentColor)) 48%,transparent)`;
-    if (compatibility?.elementId === 'bbi-app-host') {
-        // Keep Vue's own dimensions and icon styles intact beneath this
-        // temporary square, so the original shape returns on release.
-        collectedStyle = element.ownerDocument.createElement('style');
-        collectedStyle.textContent = `
-            .bbi-root[data-theme] > .bbi-orb{width:${SLOT_SIZE}px!important;height:${SLOT_SIZE}px!important;box-sizing:border-box!important;border:${collectedBorder}!important;border-radius:50%!important;overflow:hidden!important}
-            .bbi-root[data-theme] > .bbi-orb > .bbi-orb-icon{margin-bottom:0!important}
-        `;
-        element.getRootNode().append(collectedStyle);
-    } else if (compatibility?.elementId === 'rlog-badge-host') {
-        collectedStyle = element.ownerDocument.createElement('style');
-        collectedStyle.textContent = `
-            :host{width:${SLOT_SIZE}px!important;height:${SLOT_SIZE}px!important}
-            .rlog-badge-visual{color:var(--st-tools-ink,var(--SmartThemeBodyColor,currentColor))!important}
-            .rlog-badge-visual::before{background:transparent!important;border:${collectedBorder}!important;transform:none!important}
-        `;
-        element.shadowRoot.append(collectedStyle);
-    }
+    const collectedStyle = collectAppearance(element, control, compatibility);
     return { element, control, prior, innerOpacity, compatibility, containerZ, collectedStyle, width: collectedStyle ? SLOT_SIZE : Math.max(1, rect.width), height: collectedStyle ? SLOT_SIZE : Math.max(1, rect.height) };
 }
 

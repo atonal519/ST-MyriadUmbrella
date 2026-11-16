@@ -1,3 +1,4 @@
+import { installSendReroll } from './src/send-reroll.js';
 import { readConfig } from './src/config.js';
 import { installDock } from './src/dock.js';
 import { installEditor } from './src/editor.js';
@@ -9,6 +10,7 @@ import { installTheme } from './src/theme.js';
 import { installPresetToggles } from './src/preset-toggles.js';
 import { installCharacterFolders } from './src/character-folders.js';
 
+let sendReroll = null;
 let dock = null;
 let editor = null;
 let initialized = false;
@@ -23,6 +25,8 @@ function apply() {
     if (config.dock && !dock) dock = installDock();
     if (config.editor && !editor) editor = installEditor();
     if (!config.editor && editor) { editor(); editor = null; }
+    if (config.sendReroll && !sendReroll) sendReroll = installSendReroll();
+    if (!config.sendReroll && sendReroll) { sendReroll.destroy(); sendReroll = null; }
     applyToast(config.toast);
     if (config.presetToggles && !cleanupPresetToggles) cleanupPresetToggles = installPresetToggles();
     if (!config.presetToggles && cleanupPresetToggles) { cleanupPresetToggles(); cleanupPresetToggles = null; }
@@ -50,6 +54,7 @@ export function disable() {
     ctx.eventSource.removeListener(ctx.eventTypes.APP_READY, init);
     cleanupCharacterFolders?.(); cleanupCharacterFolders = null;
     cleanupPresetToggles?.(); cleanupPresetToggles = null;
+    sendReroll?.destroy(); sendReroll = null;
     home?.destroy(); home = null;
     dock?.destroy(); dock = null;
     editor?.(); editor = null;
